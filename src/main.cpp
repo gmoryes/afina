@@ -10,8 +10,8 @@
 #include <afina/network/Server.h>
 
 #include "network/blocking/ServerImpl.h"
-#include "network/nonblocking/ServerImpl.h"
-#include "network/uv/ServerImpl.h"
+//#include "network/nonblocking/ServerImpl.h"
+//#include "network/uv/ServerImpl.h"
 #include "storage/MapBasedGlobalLockImpl.h"
 
 #include <logger/Logger.h>
@@ -49,7 +49,10 @@ int main(int argc, char **argv) {
         // and simplify validation below
         options.add_options()("s,storage", "Type of storage service to use", cxxopts::value<std::string>());
         options.add_options()("n,network", "Type of network service to use", cxxopts::value<std::string>());
-        options.add_options()("w,workers", "Workers number", cxxopts::value<int>());
+        options.add_options()("min_workers", "Min workers number (default = 1) ", cxxopts::value<int>());
+        options.add_options()("max_workers", "Max workers number (default = 1) ", cxxopts::value<int>());
+        options.add_options()("max_queue_size", "Max threadpool queue size (default = 1) ", cxxopts::value<int>());
+        options.add_options()("idle_time", "Worker idle time(ms) (default = 100) ", cxxopts::value<int>());
         options.add_options()("h,help", "Print usage info");
         options.parse(argc, argv);
 
@@ -85,11 +88,11 @@ int main(int argc, char **argv) {
     }
 
     if (network_type == "uv") {
-        app.server = std::make_shared<Afina::Network::UV::ServerImpl>(app.storage);
+        //app.server = std::make_shared<Afina::Network::UV::ServerImpl>(app.storage);
     } else if (network_type == "blocking") {
         app.server = std::make_shared<Afina::Network::Blocking::ServerImpl>(app.storage);
     } else if (network_type == "nonblocking") {
-        app.server = std::make_shared<Afina::Network::NonBlocking::ServerImpl>(app.storage);
+        //app.server = std::make_shared<Afina::Network::NonBlocking::ServerImpl>(app.storage);
     } else {
         throw std::runtime_error("Unknown network type");
     }
@@ -111,14 +114,26 @@ int main(int argc, char **argv) {
     uv_timer_start(&timer, timer_handler, 0, 5000);
 
     // Start services
-    int workers_num = 1;
-    if (options.count("workers") > 0) {
-        workers_num = options["workers"].as<int>();
+    int min_w = 1;
+    if (options.count("min_workers") > 0) {
+        min_w = options["min_workers"].as<int>();
     }
+    int max_w = 1;
+    if (options.count("max_workers") > 0) {
+        max_w = options["max_workers"].as<int>();
+    }
+    int max_queue_size = 1;
+    if (options.count("max_queue_size") > 0) {
+        max_queue_size = options["max_queue_size"].as<int>();
+    }
+    int idle_time = 100;
+    if (options.count("idle_time") > 0) {
+        idle_time = options["idle_time"].as<int>();
+    }
+
     try {
         app.storage->Start();
-        app.server->Start(8080, workers_num);
-
+        app.server->Start(8080, 1, min_w, max_w, max_queue_size, idle_time);
         // Freeze current thread and process events
         std::cout << "Application started" << std::endl;
         uv_run(&loop, UV_RUN_DEFAULT);

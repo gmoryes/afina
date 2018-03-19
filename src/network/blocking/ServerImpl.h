@@ -12,47 +12,18 @@
 #include <unistd.h>
 #include <fcntl.h>
 #include <iostream>
-//#include <logger/Logger.h>
+#include <logger/Logger.h>
 
 #include <afina/network/Server.h>
 #include <protocol/Parser.h>
+#include <executor/Executor.h>
+#include <afina/execute/Command.h>
 
 
 namespace Afina {
 
 namespace Network {
 namespace Blocking {
-
-// Class maganages threads' statutes
-class ThreadsStatus {
-public:
-    ThreadsStatus() = default;
-    ~ThreadsStatus() = default;
-
-    // Add new thread to map
-    void add_thread(std::thread);
-
-    // Check is thread with id - thread_id is still running
-    bool is_alive(std::thread::id);
-
-    // Match thread width id - thread_id as done
-    void add_done(std::thread::id);
-
-    // Delete dead threads
-    void update();
-
-    // Join threads
-    void join();
-
-    size_t size() const;
-
-private:
-    std::mutex _lock;
-    std::vector<std::thread> connections;
-
-    // Thread + is_alive
-    std::unordered_map<std::thread::id, bool> statuses;
-};
 
 // Class Socket for read all data from it
 class Socket {
@@ -94,6 +65,62 @@ private:
     std::string body;
 };
 
+class Task {
+public:
+    using storage_type = std::shared_ptr<Afina::Storage>&;
+    Task(storage_type storage, int fh):
+        storage(storage),
+        client_socket(fh)
+    {
+        Logger& logger = Logger::Instance();
+        logger.write("New task created");
+    }
+
+    void operator() () {
+        Logger& logger = Logger::Instance();
+
+        //logger.write("Get task:", task_id);
+
+        Socket client(client_socket);
+
+        std::string data;
+
+        while (true) {
+
+            // Read data from client socket
+            client.Read(data);
+
+            // Check if no errors happened
+            if (!client.good()) {
+                logger.write("Error while read happend");
+                std::string error_msg = "SERVER_ERROR Interval Server Error\r\n";
+                client.Write(error_msg);
+                break;
+            }
+
+            if (client.is_empty()) {
+                logger.write("No data anymore");
+                break;
+            }
+
+            std::string out;
+            logger.write("storage = ", storage);
+            client.command->Execute(*storage, client.Body(), out);
+            out += "\r\n";
+            client.Write(out);
+
+            // Error in Write
+            if (!client.good())
+                break;
+        }
+
+        close(client_socket);
+    }
+private:
+    std::shared_ptr<Afina::Storage> storage;
+    int client_socket;
+};
+
 /**
  * # Network resource manager implementation
  * Server that is spawning a separate thread for each connection
@@ -104,7 +131,7 @@ public:
     ~ServerImpl();
 
     // See Server.h
-    void Start(uint32_t port, uint16_t workers) override;
+    void Start(uint32_t, u_int16_t, size_t, size_t, size_t, size_t) override;
 
     // See Server.h
     void Stop() override;
@@ -118,10 +145,6 @@ protected:
      */
     void RunAcceptor();
 
-    /**
-     * Methos is running for each connection
-     */
-    void Worker(int, size_t);
 private:
     static void* RunAcceptorProxy(void* p);
 
@@ -151,9 +174,9 @@ private:
     // connections list
     std::condition_variable connections_cv;
 
-    // Threads that are processing connection data, permits
-    // access only from inside of accept_thread
-    ThreadsStatus threads_status;
+    // Thread Pool with threads
+    ::Afina::Executor thread_pool;
+
 };
 
 } // namespace Blocking

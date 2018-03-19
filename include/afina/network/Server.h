@@ -2,6 +2,7 @@
 #define AFINA_NETWORK_SERVER_H
 
 #include <memory>
+#include <utility>
 #include <vector>
 
 namespace Afina {
@@ -14,7 +15,7 @@ namespace Network {
  */
 class Server {
 public:
-    Server(std::shared_ptr<Afina::Storage> ps) : pStorage(ps) {}
+    Server(std::shared_ptr<Afina::Storage> ps) : pStorage(std::move(ps)) {}
     virtual ~Server() {}
 
     /**
@@ -22,7 +23,12 @@ public:
      * listen on the given interface/port pair to process  incoming
      * data in workers number of threads
      */
-    virtual void Start(uint32_t port, uint16_t workers = 1) = 0;
+    virtual void Start(uint32_t port,
+                       uint16_t workers = 1,
+                       size_t low_watermark = 1,
+                       size_t hight_watermark = 1,
+                       size_t max_queue_size = 1,
+                       size_t idle_time = 100) = 0;
 
     /**
      * Signal all worker threads that server is going to shutdown. After method returns

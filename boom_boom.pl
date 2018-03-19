@@ -1,8 +1,11 @@
+#!/usr/bin/perl
+
 use warnings;
 use strict;
 use feature qw(say);
 use DDP;
 
+use Fcntl;
 use IO::Socket::INET;
 
 my $fork_cnt = 0;
@@ -36,7 +39,7 @@ for my $i (1 .. $fork_cnt) {
         }
         $socket->autoflush(1);
         for (1..3) {
-            my $msg = $pre."foo".$suf;
+            my $msg = $pre."aaaaaaaaaaaaaaaaaaaaaaaaaafoo".$suf;
             $suf++;
             my $full_msg = "set $msg 0 0 6\r\nnewval\r\n";
             logg "start send($msg), size=".length($full_msg);
@@ -58,15 +61,23 @@ for my $pid (@pids) {
     kill 'INT', $pid;
 }
 
-
-
-# Help subs
+sub quote_symbols {
+    my ($msg) = @_;
+    $msg =~ s/\n/\\n/sgm;
+    $msg =~ s/\r/\\r/sgm;
+    return $msg;
+}
 
 sub socket_write {
 	my ($socket, $msg) = @_;
     my $sended = 0;
-	$sended = send($socket, $msg, 0);
-    logg "send($sended)";
+    my $buff;
+    my $ret = recv($socket, $buff, 1, MSG_PEEK | MSG_DONTWAIT);;
+    if (defined $ret) {
+        return 0;
+    }
+    say "start send: \"".quote_symbols($msg)."\", size=".length($msg);
+	$sended = send($socket, $msg, MSG_DONTWAIT | O_NONBLOCK);
     if ($sended) { 
         return 1;
     } else {

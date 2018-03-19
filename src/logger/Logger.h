@@ -42,10 +42,10 @@ public:
 
     template <class T, class ...Args>
     void write(T t, Args... args) {
+        std::lock_guard<std::mutex> lock(write_lock);
 
         std::string str = parse_arguments(t, args...);
 
-        std::lock_guard<std::mutex> lock(write_lock);
 
         std::chrono::time_point<std::chrono::system_clock> now =
             std::chrono::system_clock::now();

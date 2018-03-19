@@ -1,11 +1,11 @@
-package GetBadKey;
+package tests::GetBadKey;
 
 use strict;
 use warnings;
 use feature qw(say);
 
 use FindBin;
-use lib "$FindBin::Bin";
+use lib "$FindBin::Bin/lib";
 
 use Server;
 use Utils qw(quote_symbols);
