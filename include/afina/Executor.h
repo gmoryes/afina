@@ -45,8 +45,6 @@ public:
         max_queue_size_  = max_queue_size;
         idle_time_       = idle_time;
 
-        tasks_in_progress.store(0);
-
         Logger& logger = Logger::Instance();
         logger.write("Start create ThreadPool");
         logger.write("ThredPool params");
@@ -100,7 +98,9 @@ public:
      */
     template <typename F, typename... Types> bool Execute(F &&func, Types... args);
 
-    // Return true if we can add to out thread pool tasks
+    /**
+     * Return true if we can add to out thread pool tasks
+     */
     bool can_add() {
         std::lock_guard<std::mutex> lock(mutex);
 
@@ -110,9 +110,7 @@ public:
         if (buzy_workers.load() < hight_watermark_)
             return true;
 
-
         return tasks.size() < max_queue_size_;
-
     }
 
     // No copy/move/assign allowed
@@ -139,14 +137,15 @@ public:
         return result;
     }
 
+    /**
+     * Return true if thread must be dead, because of idle time,
+     * and false if it is not necessary
+     */
     bool should_end() {
         Logger& logger = Logger::Instance();
 
         size_t threads_num = alive_threads_size();
         auto cur_thread_id = std::this_thread::get_id();
-
-        logger.write("threads num:", threads_num);
-        logger.write("low:", low_watermark_);
 
         if (threads_num > low_watermark_) {
             // Add thread to queue to join
@@ -168,7 +167,6 @@ public:
     }
 private:
 
-    std::atomic<int> tasks_in_progress;
     /**
      * Main function that all pool threads are running. It polls internal task queue and execute tasks
      */
@@ -189,6 +187,7 @@ private:
 
             while (executor->tasks.empty() && executor->state == Executor::State::kRun) {
                 logger.write("Wait events");
+
                 auto prev_time = std::chrono::system_clock::now();
                 executor->empty_condition.wait_until(
                     lock,
@@ -197,6 +196,7 @@ private:
 
                 auto cur_time = std::chrono::system_clock::now();
                 auto int_ms = std::chrono::duration_cast<std::chrono::milliseconds>(cur_time - prev_time);
+
                 if (int_ms.count() >= executor->idle_time_) {
                     if (executor->should_end()) {
                         logger.write("Goodbye (idle time)");
@@ -228,23 +228,18 @@ private:
     }
 
     int get_new_thread_number() {
-        Logger& logger = Logger::Instance();
-
         bool used[hight_watermark_];
         for (int i = 0; i < hight_watermark_; ++i)
             used[i] = false;
 
-        for (int i = 0; i < threads.size(); ++i) {
-            logger.write("thread:", i, "is ", threads[i].active, " number:", threads[i].thread_number);
+        for (int i = 0; i < threads.size(); ++i)
             used[threads[i].thread_number] = threads[i].active;
-        }
 
-        for (int i = 0; i < hight_watermark_; ++i) {
+        for (int i = 0; i < hight_watermark_; ++i)
             if (!used[i])
                 return i;
-        }
 
-        std::__throw_runtime_error("Can not find number for new thread");
+        throw std::runtime_error("Can not find number for new thread");
     }
 
     /**
@@ -283,7 +278,7 @@ private:
     /**
      * Flag to stop bg threads
      */
-    State state;
+    std::atomic<State> state;
 
     /**
      * Vector of threads, that are must be joined

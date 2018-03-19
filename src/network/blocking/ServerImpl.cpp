@@ -319,19 +319,6 @@ bool Socket::_make_non_blocking() {
     return true;
 }
 
-bool Socket::_male_blokcing() {
-    Logger& logger = Logger::Instance();
-    int flags = fcntl(_fh, F_GETFL, 0);
-    if (fcntl(_fh, F_SETFL, flags & ~O_NONBLOCK)) {
-
-        logger.write("Can not change flags of file handler =", _fh);
-
-        return false;
-    }
-
-    return true;
-}
-
 void Socket::Write(std::string &out) {
     Logger& logger = Logger::Instance();
     int has_send_all = 0;
