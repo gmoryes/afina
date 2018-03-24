@@ -57,11 +57,9 @@ public:
 
         for (int i = 0; i < low_watermark; i++) {
             try {
-
                 std::thread thread(&perform, this, i);
                 threads.push_back(Thread(thread.get_id(), i));
                 thread.detach();
-
             } catch (std::runtime_error &ex) {
                 logger.write("Error while thread creating: ", ex.what());
             }
@@ -82,31 +80,15 @@ public:
 
     std::condition_variable thread_done;
 
-
-
-    int number_of_active_threads() {
-        int result = 0;
-        for (auto it = threads.begin(); it != threads.end();) {
-            if (it->active) {
-                result++;
-                ++it;
-            } else {
-                threads.erase(it);
-            }
-        }
-
-        return result;
-    }
-
     // Wait until all threads will be done
     void wait_threads() {
         std::unique_lock<std::mutex> lock(mutex);
 
         Logger& logger = Logger::Instance();
         logger.write("Going to wait threads");
-        int num;
+        size_t num;
 
-        while ((num = number_of_active_threads())) {
+        while ((num = threads.size())) {
             logger.write("Wait for", num, "threads");
             thread_done.wait(lock);
         }
@@ -152,10 +134,10 @@ public:
         return tasks.size() < max_queue_size_;
     }
 
-    void make_non_active_this_thread() {
-        for (auto& item : threads) {
-            if (item.thread_id == std::this_thread::get_id()) {
-                item.active = false;
+    void delete_this_thread() {
+        for (auto it = threads.begin(); it != threads.end(); ++it) {
+            if (it->thread_id == std::this_thread::get_id()) {
+                threads.erase(it);
                 break;
             }
         }
@@ -166,14 +148,7 @@ public:
      * and false if it is not necessary
      */
     bool should_end() {
-        Logger& logger = Logger::Instance();
-
-        size_t threads_num = number_of_active_threads();
-
-        if (threads_num > low_watermark_)
-            return true;
-
-        return false;
+        return threads.size() > low_watermark_;
     }
 private:
 
@@ -260,13 +235,15 @@ private:
             logger.write("Task done");
         }
 
-        // Make thread non active for reuse number of worker
-        std::lock_guard<std::mutex> lock(executor->mutex);
+        {
+            // Erase thread from vector for reuse it's number
+            std::lock_guard<std::mutex> lock(executor->mutex);
 
-        executor->make_non_active_this_thread();
+            executor->delete_this_thread();
 
-        executor->thread_done.notify_one();
-        logger.write("Goodbye");
+            executor->thread_done.notify_one();
+            logger.write("Goodbye");
+        }
     }
 
     /**
@@ -277,15 +254,8 @@ private:
         for (int i = 0; i < hight_watermark_; ++i)
             used[i] = false;
 
-        for (auto it = threads.begin(); it != threads.end();) {
-            used[it->thread_number] = it->active;
-
-            if (!it->active) {
-                threads.erase(it);
-            } else {
-                ++it;
-            }
-        }
+        for (auto& item : threads)
+            used[item.thread_number] = true;
 
         for (int i = 0; i < hight_watermark_; ++i)
             if (!used[i])
@@ -308,12 +278,10 @@ private:
         Thread(std::thread::id thread_id,
                int thread_number):
             thread_id(thread_id),
-            thread_number(thread_number),
-            active (true) {}
+            thread_number(thread_number) {}
 
         std::thread::id thread_id;
         int thread_number;
-        bool active;
     };
 
     /**
@@ -361,7 +329,6 @@ template <typename F, typename... Types> bool Executor::Execute(F &&func, Types.
     logger.write("Busy/All:", cur_workers_number, "/", threads.size());
 
     if (cur_workers_number == threads.size() && cur_workers_number < hight_watermark_) {
-
         try {
             // Get number of worker
             int new_thread_number = get_new_thread_number();
@@ -370,7 +337,6 @@ template <typename F, typename... Types> bool Executor::Execute(F &&func, Types.
 
             // Create worker
             std::thread thread(&perform, this, new_thread_number);
-
             // Save it to vector
             threads.push_back(Thread(thread.get_id(), new_thread_number));
             thread.detach();
@@ -378,7 +344,6 @@ template <typename F, typename... Types> bool Executor::Execute(F &&func, Types.
             logger.write("Error while thread creating: ", ex.what());
         }
     }
-
     // Enqueue new task
     tasks.push_back(exec);
     empty_condition.notify_one();
