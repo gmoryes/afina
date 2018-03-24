@@ -194,6 +194,7 @@ void ServerImpl::RunAcceptor() {
 
     int select_retval;
     logger.i_am(std::string("MASTER"));
+    logger.write("Hello");
     int task_id = 0;
     while (running.load()) {
 
@@ -230,9 +231,7 @@ void ServerImpl::RunAcceptor() {
         }
 
         try {
-            thread_pool.lock();
             thread_pool.Execute(Task(pStorage, client_socket));
-            thread_pool.unlock();
             task_id++;
         } catch (std::runtime_error &ex) {
             std::cerr << ex.what() << std::endl;

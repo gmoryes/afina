@@ -57,7 +57,11 @@ public:
 
         for (int i = 0; i < low_watermark; i++) {
             try {
-                threads.push_back(Thread(std::thread(&perform, this, i), i));
+
+                std::thread thread(&perform, this, i);
+                threads.push_back(Thread(thread.get_id(), i));
+                thread.detach();
+
             } catch (std::runtime_error &ex) {
                 logger.write("Error while thread creating: ", ex.what());
             }
@@ -65,7 +69,9 @@ public:
 
         logger.write("Threads for ThreadPool created!");
     }
-    ~Executor() {}
+    ~Executor() {
+        wait_threads();
+    }
 
     /**
      * Signal thread pool to stop, it will stop accepting new jobs and close threads just after each become
@@ -73,20 +79,53 @@ public:
      *
      * In case if await flag is true, call won't return until all background jobs are done and all threads are stopped
      */
+
+    std::condition_variable thread_done;
+
+
+
+    int number_of_active_threads() {
+        int result = 0;
+        for (auto it = threads.begin(); it != threads.end();) {
+            if (it->active) {
+                result++;
+                ++it;
+            } else {
+                threads.erase(it);
+            }
+        }
+
+        return result;
+    }
+
+    // Wait until all threads will be done
+    void wait_threads() {
+        std::unique_lock<std::mutex> lock(mutex);
+
+        Logger& logger = Logger::Instance();
+        logger.write("Going to wait threads");
+        int num;
+
+        while ((num = number_of_active_threads())) {
+            logger.write("Wait for", num, "threads");
+            thread_done.wait(lock);
+        }
+
+        state = State::kStopped;
+    }
+
     void Stop(bool await = false) {
         Logger& logger = Logger::Instance();
-        logger.write("start stop");
+        logger.write("Start stop");
+
         state = State::kStopping;
-        logger.write("notify send");
+
+        logger.write("Notify send");
         empty_condition.notify_all();
-        logger.write("notify sended");
-        if (await) {
-            for (int i = 0; i < threads.size(); i++) {
-                logger.write("Wait join of", threads[i].thread.get_id());
-                threads[i].thread.join();
-            }
-            state = State::kStopped;
-        }
+        logger.write("Notify sended");
+
+        if (await)
+            wait_threads();
     }
 
     /**
@@ -113,28 +152,13 @@ public:
         return tasks.size() < max_queue_size_;
     }
 
-    // No copy/move/assign allowed
-    Executor(const Executor &)            = delete;
-    Executor(Executor &&)                 = delete;
-    Executor &operator=(const Executor &) = delete;
-    Executor &operator=(Executor &&)      = delete;
-
-    void lock() {
-        mutex.lock();
-    }
-
-    void unlock() {
-        mutex.unlock();
-    }
-
-    size_t alive_threads_size() {
-        size_t result = 0;
-        for (auto& thread : threads) {
-            if (thread.active)
-                result++;
+    void make_non_active_this_thread() {
+        for (auto& item : threads) {
+            if (item.thread_id == std::this_thread::get_id()) {
+                item.active = false;
+                break;
+            }
         }
-
-        return result;
     }
 
     /**
@@ -144,37 +168,33 @@ public:
     bool should_end() {
         Logger& logger = Logger::Instance();
 
-        size_t threads_num = alive_threads_size();
-        auto cur_thread_id = std::this_thread::get_id();
+        size_t threads_num = number_of_active_threads();
 
-        if (threads_num > low_watermark_) {
-            // Add thread to queue to join
-            logger.write("must die");
-            must_be_joined.push_back(cur_thread_id);
-
-            // Mark this thread as non-active
-            for (auto& thread : threads) {
-                if (thread.thread.get_id() == cur_thread_id) {
-                    thread.active = false;
-                    break;
-                }
-            }
-
+        if (threads_num > low_watermark_)
             return true;
-        }
 
         return false;
     }
 private:
 
+    // No copy/move/assign allowed
+    Executor(const Executor &)            = delete;
+    Executor(Executor &&)                 = delete;
+    Executor &operator=(const Executor &) = delete;
+    Executor &operator=(Executor &&)      = delete;
+
     /**
      * Main function that all pool threads are running. It polls internal task queue and execute tasks
      */
     friend void perform(Executor *executor, int thread_num) {
-        std::unique_lock<std::mutex> lock(executor->mutex);
+        std::function<void()> task;
+
+        // Flag of idle time
+        bool should_end = false;
 
         Logger& logger = Logger::Instance();
 
+        // Set name of thread for Logger
         std::stringstream ss;
         ss << "POOL_WORKER_";
         ss << thread_num;
@@ -185,55 +205,87 @@ private:
         // While ThredPool is run
         while (executor->state == Executor::State::kRun) {
 
-            while (executor->tasks.empty() && executor->state == Executor::State::kRun) {
-                logger.write("Wait events");
+            {
+                // Critical section for condvar
+                std::unique_lock<std::mutex> lock(executor->mutex);
 
-                auto prev_time = std::chrono::system_clock::now();
-                executor->empty_condition.wait_until(
-                    lock,
-                    prev_time + std::chrono::milliseconds(executor->idle_time_)
-                );
+                // Out of loop because of unsuspicious wakeups
+                auto start_wait_task_time = std::chrono::system_clock::now();
+                while (executor->tasks.empty() && executor->state == Executor::State::kRun) {
+                    logger.write("Wait events");
 
-                auto cur_time = std::chrono::system_clock::now();
-                auto int_ms = std::chrono::duration_cast<std::chrono::milliseconds>(cur_time - prev_time);
+                    executor->empty_condition.wait_until(
+                        lock,
+                        start_wait_task_time + std::chrono::milliseconds(executor->idle_time_)
+                    );
 
-                if (int_ms.count() >= executor->idle_time_) {
-                    if (executor->should_end()) {
-                        logger.write("Goodbye (idle time)");
-                        return;
+                    auto cur_time = std::chrono::system_clock::now();
+                    auto int_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        cur_time - start_wait_task_time
+                    );
+
+                    if (int_ms.count() >= executor->idle_time_) {
+                        if (executor->should_end()) {
+                            logger.write("Goodbye (idle time)");
+                            should_end = true;
+                            break;
+                        }
+                        start_wait_task_time = std::chrono::system_clock::now();
                     }
                 }
+
+                // We don't know, whether the queue is not empty, or server is stoppping
+                if (executor->state != Executor::State::kRun)
+                    break;
+
+                if (should_end)
+                    break;
+
+                executor->buzy_workers.fetch_add(1);
+
+                // Get task in lock (!)
+                task = std::move(executor->tasks.front());
+                executor->tasks.pop_front();
+
+                logger.write("Get task, unlock mutex");
             }
 
-            if (executor->state != Executor::State::kRun)
-                break;
-
-            executor->buzy_workers.fetch_add(1);
-
-            // Get task in lock (!)
-            auto task = std::move(executor->tasks.front());
-            executor->tasks.pop_front();
-
-            logger.write("Get task, unlock mutex");
-            executor->mutex.unlock();
-
-            task();
+            try {
+                task();
+            } catch (std::runtime_error& error) {
+                logger.write("Error while executing task:", error.what());
+            }
             executor->buzy_workers.fetch_sub(1);
 
-            logger.write("Task done, wait lock");
-            executor->mutex.lock();
+            logger.write("Task done");
         }
 
+        // Make thread non active for reuse number of worker
+        std::lock_guard<std::mutex> lock(executor->mutex);
+
+        executor->make_non_active_this_thread();
+
+        executor->thread_done.notify_one();
         logger.write("Goodbye");
     }
 
+    /**
+     * Return number of new worker
+     */
     int get_new_thread_number() {
         bool used[hight_watermark_];
         for (int i = 0; i < hight_watermark_; ++i)
             used[i] = false;
 
-        for (int i = 0; i < threads.size(); ++i)
-            used[threads[i].thread_number] = threads[i].active;
+        for (auto it = threads.begin(); it != threads.end();) {
+            used[it->thread_number] = it->active;
+
+            if (!it->active) {
+                threads.erase(it);
+            } else {
+                ++it;
+            }
+        }
 
         for (int i = 0; i < hight_watermark_; ++i)
             if (!used[i])
@@ -253,19 +305,19 @@ private:
     std::condition_variable empty_condition;
 
     struct Thread {
-        Thread(std::thread thread,
+        Thread(std::thread::id thread_id,
                int thread_number):
-            thread(std::move(thread)),
+            thread_id(thread_id),
             thread_number(thread_number),
-            active(true) {}
+            active (true) {}
 
-        std::thread thread;
+        std::thread::id thread_id;
         int thread_number;
         bool active;
     };
 
     /**
-     * Vector of actual threads that perorm execution, and flag
+     * Vector of actual threads that perform execution, and flag
      * is it active or not
      */
     std::vector<Thread> threads;
@@ -283,7 +335,6 @@ private:
     /**
      * Vector of threads, that are must be joined
      */
-    std::vector<std::thread::id> must_be_joined;
 
     std::atomic<size_t> buzy_workers;
 
@@ -295,6 +346,8 @@ private:
 };
 
 template <typename F, typename... Types> bool Executor::Execute(F &&func, Types... args) {
+    std::lock_guard<std::mutex> lock(mutex);
+
     if (state != State::kRun) {
         return false;
     }
@@ -304,28 +357,23 @@ template <typename F, typename... Types> bool Executor::Execute(F &&func, Types.
     auto exec = std::bind(std::forward<F>(func), std::forward<Types>(args)...);
 
     size_t cur_workers_number = buzy_workers.load();
-    logger.write("Busy/All:", cur_workers_number, "/", threads.size());
 
-    for (auto thread_id : must_be_joined) {
-        for (auto it = threads.begin(); it != threads.end();) {
-            if (it->thread.get_id() == thread_id) {
-                logger.write("Wait join because of idle:", thread_id);
-                it->thread.join();
-                threads.erase(it);
-            } else {
-                ++it;
-            }
-        }
-    }
-    must_be_joined.clear();
+    logger.write("Busy/All:", cur_workers_number, "/", threads.size());
 
     if (cur_workers_number == threads.size() && cur_workers_number < hight_watermark_) {
 
-        int cur_threads_num = static_cast<int>(threads.size());
         try {
+            // Get number of worker
             int new_thread_number = get_new_thread_number();
+
             logger.write("All workers are buzy, create new", new_thread_number);
-            threads.push_back(Thread(std::thread(&perform, this, new_thread_number), new_thread_number));
+
+            // Create worker
+            std::thread thread(&perform, this, new_thread_number);
+
+            // Save it to vector
+            threads.push_back(Thread(thread.get_id(), new_thread_number));
+            thread.detach();
         } catch (std::runtime_error &ex) {
             logger.write("Error while thread creating: ", ex.what());
         }
