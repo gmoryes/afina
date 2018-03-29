@@ -51,21 +51,24 @@ ServerImpl::ServerImpl(std::shared_ptr<Afina::Storage> ps) : Server(ps) {}
 // See Server.h
 ServerImpl::~ServerImpl() {}
 
-// See Server.h
-void ServerImpl::Start(uint32_t port,
-                       uint16_t workers = 1,
-                       size_t low_watermark = 1,
-                       size_t hight_watermark = 1,
-                       size_t max_queue_size = 1,
-                       size_t idle_time = 100) {
-    std::cout << "network debug: " << __PRETTY_FUNCTION__ << std::endl;
 
+void ServerImpl::StartThreadPool(size_t low_watermark = 1,
+                                 size_t hight_watermark = 1,
+                                 size_t max_queue_size = 1,
+                                 size_t idle_time = 100) {
     thread_pool.Start(
         low_watermark,
         hight_watermark,
         max_queue_size,
         idle_time
     );
+}
+
+// See Server.h
+void ServerImpl::Start(uint32_t port,
+                       uint16_t workers = 1) {
+    std::cout << "network debug: " << __PRETTY_FUNCTION__ << std::endl;
+
 
     // If a client closes a connection, this will generally produce a SIGPIPE
     // signal that will kill the process. We want to ignore this signal, so send()
@@ -240,6 +243,7 @@ void ServerImpl::RunAcceptor() {
     }
     close(server_socket);
 }
+
 
 Socket::Socket(int fh) : _fh(fh), _good(true), _empty(false) {}
 

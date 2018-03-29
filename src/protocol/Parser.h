@@ -48,7 +48,7 @@ public:
      * Builds new command from parsed input. In case if it wasn't enough input to parse command out
      * method return nullptr
      */
-    using Command = std::unique_ptr<Execute::Command>;
+    using Command = std::unique_ptr<Afina::Execute::Command>;
     Command Build(uint32_t &body_size) const;
     /**
      * Reset parse so that it could be used to parse out new command

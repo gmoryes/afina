@@ -29,9 +29,14 @@ ServerImpl::ServerImpl(std::shared_ptr<Afina::Storage> ps) : Server(ps) {}
 // See Server.h
 ServerImpl::~ServerImpl() {}
 
+// No thread pool in this server type
+void ServerImpl::StartThreadPool(size_t, size_t, size_t, size_t) {}
+
 // See Server.h
 void ServerImpl::Start(uint32_t port, uint16_t n_workers) {
     std::cout << "network debug: " << __PRETTY_FUNCTION__ << std::endl;
+
+    Logger& logger = Logger::Instance();
 
     // If a client closes a connection, this will generally produce a SIGPIPE
     // signal that will kill the process. We want to ignore this signal, so send()
@@ -56,7 +61,7 @@ void ServerImpl::Start(uint32_t port, uint16_t n_workers) {
     }
 
     int opts = 1;
-    if (setsockopt(server_socket, SOL_SOCKET, 0, &opts, sizeof(opts)) == -1) {
+    if (setsockopt(server_socket, SOL_SOCKET, SO_REUSEPORT, &opts, sizeof(opts)) == -1) {
         close(server_socket);
         throw std::runtime_error("Socket setsockopt() failed");
     }
@@ -73,9 +78,15 @@ void ServerImpl::Start(uint32_t port, uint16_t n_workers) {
     }
 
     for (int i = 0; i < n_workers; i++) {
+        logger.write("Storage count:", pStorage.use_count());
         workers.emplace_back(pStorage);
-        workers.back().Start(server_socket);
     }
+
+    for (int i = 0; i < n_workers; i++) {
+        workers[i].Start(server_socket, i);
+    }
+
+    logger.write("Storage count after for:", pStorage.use_count());
 }
 
 // See Server.h

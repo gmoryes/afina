@@ -22,7 +22,8 @@ public:
     ~ServerImpl();
 
     // See Server.h
-    void Start(uint32_t, u_int16_t, size_t, size_t, size_t, size_t) override;
+    void Start(uint32_t, uint16_t) override;
+    void StartThreadPool(size_t, size_t, size_t, size_t) override;
 
     // See Server.h
     void Stop() override;

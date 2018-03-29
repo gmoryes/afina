@@ -10,7 +10,7 @@
 #include <afina/network/Server.h>
 
 #include "network/blocking/ServerImpl.h"
-//#include "network/nonblocking/ServerImpl.h"
+#include "network/nonblocking/ServerImpl.h"
 //#include "network/uv/ServerImpl.h"
 #include "storage/MapBasedGlobalLockImpl.h"
 
@@ -53,6 +53,7 @@ int main(int argc, char **argv) {
         options.add_options()("max_workers", "Max workers number (default = 1) ", cxxopts::value<int>());
         options.add_options()("max_queue_size", "Max threadpool queue size (default = 1) ", cxxopts::value<int>());
         options.add_options()("idle_time", "Worker idle time(ms) (default = 100) ", cxxopts::value<int>());
+        options.add_options()("w,workers", "Workers number (default = 1) ", cxxopts::value<int>());
         options.add_options()("h,help", "Print usage info");
         options.parse(argc, argv);
 
@@ -92,7 +93,7 @@ int main(int argc, char **argv) {
     } else if (network_type == "blocking") {
         app.server = std::make_shared<Afina::Network::Blocking::ServerImpl>(app.storage);
     } else if (network_type == "nonblocking") {
-        //app.server = std::make_shared<Afina::Network::NonBlocking::ServerImpl>(app.storage);
+        app.server = std::make_shared<Afina::Network::NonBlocking::ServerImpl>(app.storage);
     } else {
         throw std::runtime_error("Unknown network type");
     }
@@ -131,9 +132,18 @@ int main(int argc, char **argv) {
         idle_time = options["idle_time"].as<int>();
     }
 
+    int workers_cnt = 1;
+    if (options.count("workers") > 0) {
+        workers_cnt = options["workers"].as<int>();
+    }
+
     try {
         app.storage->Start();
-        app.server->Start(8080, 1, min_w, max_w, max_queue_size, idle_time);
+
+        app.server->Start(8080, workers_cnt);
+        if (network_type == "blocking") {
+            app.server->StartThreadPool(min_w, max_w, max_queue_size, idle_time);
+        }
         // Freeze current thread and process events
         std::cout << "Application started" << std::endl;
         uv_run(&loop, UV_RUN_DEFAULT);
