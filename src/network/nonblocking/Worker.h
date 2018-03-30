@@ -19,9 +19,12 @@ class Storage;
 namespace Network {
 namespace NonBlocking {
 
+/**
+ * Class of processing tasks, the worker call process() from epoll
+ */
 class Task {
 public:
-    Task() = default;
+    Task():client_fh(-1), _should_end(false) {};
     Task(Task&& from) {
         client_fh = from.client_fh;
         from.client_fh = -1;
@@ -30,7 +33,7 @@ public:
         need_write = from.need_write;
         _should_end = from._should_end;
     }
-    Task(int client_fh): client_fh(client_fh) {}
+    Task(int client_fh): client_fh(client_fh), _should_end(false) {}
     ~Task() {
         close(client_fh);
     }
@@ -40,42 +43,41 @@ public:
 
         Socket socket(client_fh);
 
-        if (events & EPOLLIN) {
-            // If we have some data to read
-            bool find_command = socket.Read(buffer);
-            if (find_command) {
-                socket.command->Execute(*ps, socket.Body(), need_write);
-                need_write += "\r\n";
-                socket.Write(need_write);
+        if (events & EPOLLIN || events & EPOLLOUT) {
+            // If we have some data to read/write
+            bool success;
+            if (events & EPOLLIN) {
+                success = socket.Read(buffer);
             } else {
-                if (!socket.good()) {
+                success = socket.Write(need_write);
+            }
+
+            if (success) {
+                if (events & EPOLLIN) {
+                    socket.command->Execute(*ps, socket.Body(), need_write);
+                    need_write += "\r\n";
+                    socket.Write(need_write);
+                }
+            } else {
+                if (socket.socket_error()) {
                     // need delete from epoll
                     _should_end = true;
                     logger.write("Error while processing socket:", client_fh);
+                } else if (socket.internal_error()) {
+                    need_write = "SERVER_ERROR Internal Error\r\n";
+                    socket.Write(need_write);
                 } else if (socket.is_closed()) {
                     _should_end = true;
                     logger.write("No data anymore");
-                }
-            }
-        } else if (events & EPOLLOUT) {
-            // If we have availability for write data
-            bool should_continue = socket.Write(need_write);
-            if (!should_continue) {
-                if (!socket.good()) {
-                    logger.write("Error while processing socket:", client_fh);
-                    _should_end = true;
-                } else if (socket.is_closed()) {
-                    logger.write("Client suddenly closed connection :(");
-                    _should_end = true;
                 } else {
-                    logger.write("I don't know what is happening!!!");
+                    logger.write("WTF! I don't know what's happening now!");
                 }
             }
         } else if (events & EPOLLHUP) {
             // If client disconnected
             _should_end = true;
         } else {
-            logger.write("fuck fuck fuck, WTF, events:", events);
+            logger.write("Unknown event:", events);
         }
     }
 

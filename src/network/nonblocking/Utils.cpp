@@ -29,9 +29,10 @@ void make_socket_non_blocking(int sfd) {
     }
 }
 
-Socket::Socket(int fh) : _fh(fh), _good(true), _empty(false), _closed(false) {}
-
-Socket::~Socket() {}
+Socket::Socket(int fh) : _fh(fh),
+                         _socket_error(false),
+                         _internal_error(false),
+                         _closed(false) {}
 
 bool Socket::is_closed() {
     return _closed;
@@ -52,7 +53,7 @@ bool Socket::Read(std::string &out) {
     }
 
     if (has_read < 0 && errno != EAGAIN) {
-        _good = false;
+        _socket_error = true;
         return false;
     }
 
@@ -64,13 +65,26 @@ bool Socket::Read(std::string &out) {
         logger.write("Current buffer:", out);
 
         size_t cur_parsed;
-        bool find_command = parser.Parse(std::string(out.data() + parsed), cur_parsed);
+        bool find_command;
+        try {
+            find_command = parser.Parse(std::string(out.data() + parsed), cur_parsed);
+        } catch (std::runtime_error& error) {
+            logger.write("Error during parser.Parce(), desc:", error.what());
+            _internal_error = true;
+            return false;
+        }
         parsed += cur_parsed;
         if (find_command) {
             // Get command
 
             uint32_t body_size;
-            command = parser.Build(body_size);
+            try {
+                command = parser.Build(body_size);
+            } catch (std::runtime_error& error) {
+                logger.write("Error during Build(), desc:", error.what());
+                _internal_error = true;
+                return false;
+            }
             body = std::string(out.begin() + parsed,
                                out.begin() + parsed + body_size);
 
@@ -81,6 +95,7 @@ bool Socket::Read(std::string &out) {
                 continue;
             }
 
+            // Delete data, that we has parsed
             out.erase(out.begin(), out.begin() + parsed + body_size);
             parser.Reset();
             return true;
@@ -89,18 +104,18 @@ bool Socket::Read(std::string &out) {
 
     if (!(has_read < 0 && errno == EAGAIN)) {
         logger.write("Error during read from socket(", _fh, "), errno =", errno);
-        _good = false;
+        _socket_error = true;
     }
 
     return false;
 }
 
-bool Socket::good() const {
-    return _good;
+bool Socket::socket_error() const {
+    return _socket_error;
 }
 
-bool Socket::is_empty() const {
-    return _empty;
+bool Socket::internal_error() const {
+    return _internal_error;
 }
 
 bool Socket::Write(std::string &out) {
@@ -111,18 +126,24 @@ bool Socket::Write(std::string &out) {
     bool result = false;
 
     while (has_send_all != out.size()) {
+
         has_send_now = send(_fh, out.data(), out.size(), 0);
+
         if (has_send_now < 0 && errno == EAGAIN) {
+            // Write again later
             logger.write("Socket(", _fh, ")_ is overhead now");
             result = true;
         } else if (has_send_now < 0 && errno != EAGAIN) {
-            _good = false;
+            // send return -1, but errno != EAGAIN => error
+            _socket_error = true;
             logger.write("Error during send data to socket(", _fh, "), errno = ", errno);
-        } else if (has_send_now) {
+        } else if (has_send_now > 0) {
+            // Send ok
             logger.write("Write to", _fh, has_send_now);
             has_send_all += has_send_now;
             result = true;
         } else {
+            // Send return zero => socket is closed
             _closed = true;
         }
     }

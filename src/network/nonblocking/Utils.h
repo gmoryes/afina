@@ -14,20 +14,20 @@ void make_socket_non_blocking(int sfd);
 // Class Socket for read all data from it
 class Socket {
 public:
-    Socket(int fh);
-    ~Socket();
+    explicit Socket(int fh);
+    ~Socket() = default;
 
-    // Read all data from socket
+    // Read data from socket, return true is find command
     bool Read(std::string& out);
 
-    // Write all data to socket
+    // Write data to socket, return true if some data has been writen
     bool Write(std::string& out);
 
-    // Check if was an error
-    bool good() const;
+    // Check if was an error on socket
+    bool socket_error() const;
 
-    // Check the availability of data on socket right NOW
-    bool is_empty() const;
+    // Check if was an internal error
+    bool internal_error() const;
 
     // Check if socket closed
     bool is_closed();
@@ -38,18 +38,18 @@ public:
 private:
     int _fh;
 
-    // Was error during operations
-    bool _good;
+    // Was error during operations with socket
+    bool _socket_error;
 
-    // Is no data in socket right NOW
-    bool _empty;
+    // Error, but we able to send error msg to client
+    bool _internal_error;
 
     // Is socket closed
     bool _closed;
 
     Protocol::Parser parser;
-    std::string body;
 
+    std::string body;
     std::string data;
 };
 

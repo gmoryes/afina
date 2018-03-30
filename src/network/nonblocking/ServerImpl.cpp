@@ -5,6 +5,7 @@
 #include <iostream>
 #include <memory>
 #include <stdexcept>
+#include <utility>
 
 #include <arpa/inet.h>
 #include <netdb.h>
@@ -24,7 +25,7 @@ namespace Network {
 namespace NonBlocking {
 
 // See Server.h
-ServerImpl::ServerImpl(std::shared_ptr<Afina::Storage> ps) : Server(ps) {}
+ServerImpl::ServerImpl(std::shared_ptr<Afina::Storage> ps) : Server(std::move(ps)) {}
 
 // See Server.h
 ServerImpl::~ServerImpl() {}
@@ -78,7 +79,6 @@ void ServerImpl::Start(uint32_t port, uint16_t n_workers) {
     }
 
     for (int i = 0; i < n_workers; i++) {
-        logger.write("Storage count:", pStorage.use_count());
         workers.emplace_back(pStorage);
     }
 
@@ -86,7 +86,6 @@ void ServerImpl::Start(uint32_t port, uint16_t n_workers) {
         workers[i].Start(server_socket, i);
     }
 
-    logger.write("Storage count after for:", pStorage.use_count());
 }
 
 // See Server.h

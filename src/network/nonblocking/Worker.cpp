@@ -21,11 +21,7 @@ namespace Network {
 namespace NonBlocking {
 
 // See Worker.h
-Worker::Worker(std::shared_ptr<Afina::Storage> ps): stop(false), storage(std::move(ps)) {
-    Logger& logger = Logger::Instance();
-
-    logger.write("Storage count int ctr:", storage.use_count());
-}
+Worker::Worker(std::shared_ptr<Afina::Storage> ps): stop(false), storage(std::move(ps)) {}
 
 // See Worker.h
 Worker::~Worker() {
@@ -40,7 +36,7 @@ void Worker::OnRun(int server_socket, int worker_number) {
     ss << "WORKER_" << worker_number;
     logger.i_am(ss.str());
 
-    logger.write("Hello, storage =", storage);
+    logger.write("Hello");
 
     struct epoll_event ev, events[EPOLL_SIZE];
 
@@ -57,8 +53,6 @@ void Worker::OnRun(int server_socket, int worker_number) {
 
     while(!stop) {
         events_count = epoll_wait(epoll_fd, events, EPOLL_SIZE, -1); // Timeout -1
-
-        logger.write("Storage =", storage, " debug:", storage.use_count());
 
         for (int i = 0; i < events_count; i++) {
             int socket_fh = events[i].data.fd;
@@ -91,7 +85,6 @@ void Worker::OnRun(int server_socket, int worker_number) {
 void Worker::Start(int server_socket, int worker_number) {
     Logger& logger = Logger::Instance();
 
-    logger.write("Start, storage =", storage);
     try {
         thread = std::move(std::thread(&Worker::OnRun, this, server_socket, worker_number));
         thread.detach();
@@ -112,7 +105,7 @@ void Worker::Stop() {
 // See Worker.h
 void Worker::Join() {
     std::cout << "network debug: " << __PRETTY_FUNCTION__ << std::endl;
-    // TODO: implementation here
+    // TODO: Nothing here lol
 }
 
 
