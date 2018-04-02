@@ -7,6 +7,7 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <sys/stat.h>
 
 #include <logger/Logger.h>
 
@@ -27,6 +28,11 @@ void make_socket_non_blocking(int sfd) {
     if (s == -1) {
         throw std::runtime_error("Failed to call fcntl to set socket flags");
     }
+}
+
+bool is_file_exists(const std::string& name) {
+    struct stat buffer;
+    return (stat(name.c_str(), &buffer) == 0);
 }
 
 Socket::Socket(int fh) : _fh(fh),

@@ -24,6 +24,7 @@ public:
     // See Server.h
     void Start(uint32_t, uint16_t) override;
     void StartThreadPool(size_t, size_t, size_t, size_t) override;
+    bool StartFIFO(const std::string& r_fifo, const std::string& w_fifo) override;
 
     // See Server.h
     void Stop() override;
@@ -39,6 +40,9 @@ private:
 
     // Thread that is accepting new connections
     std::vector<Worker> workers;
+
+    // File handlers for fifo files
+    int r_fifo, w_fifo;
 };
 
 } // namespace NonBlocking

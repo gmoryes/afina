@@ -9,6 +9,8 @@ namespace Afina {
 namespace Network {
 namespace NonBlocking {
 
+bool is_file_exists(const std::string&);
+
 void make_socket_non_blocking(int sfd);
 
 // Class Socket for read all data from it

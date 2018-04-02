@@ -14,6 +14,7 @@
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <fcntl.h>
 
 #include <afina/Storage.h>
 
@@ -25,10 +26,31 @@ namespace Network {
 namespace NonBlocking {
 
 // See Server.h
-ServerImpl::ServerImpl(std::shared_ptr<Afina::Storage> ps) : Server(std::move(ps)) {}
+ServerImpl::ServerImpl(std::shared_ptr<Afina::Storage> ps):
+    Server(std::move(ps)),
+    r_fifo(-1),
+    w_fifo(-1) {}
 
 // See Server.h
 ServerImpl::~ServerImpl() {}
+
+bool ServerImpl::StartFIFO(const std::string& r_fifo_name, const std::string& w_fifo_name) {
+    Logger& logger = Logger::Instance();
+
+    r_fifo = open(r_fifo_name.c_str(), O_RDONLY);
+    if (r_fifo <= 0) {
+        logger.write("Can not open file", r_fifo_name, "errno =", errno);
+        return false;
+    }
+
+    w_fifo = open(w_fifo_name.c_str(), O_WRONLY);
+    if (w_fifo <= 0) {
+        logger.write("Can not open file", w_fifo_name, "errno =", errno);
+        return false;
+    }
+
+    return true;
+}
 
 // No thread pool in this server type
 void ServerImpl::StartThreadPool(size_t, size_t, size_t, size_t) {}
@@ -78,8 +100,9 @@ void ServerImpl::Start(uint32_t port, uint16_t n_workers) {
         throw std::runtime_error("Socket listen() failed");
     }
 
+    std::pair<int, int> fifo = std::make_pair(r_fifo, w_fifo);
     for (int i = 0; i < n_workers; i++) {
-        workers.emplace_back(pStorage);
+        workers.emplace_back(pStorage, fifo);
     }
 
     for (int i = 0; i < n_workers; i++) {

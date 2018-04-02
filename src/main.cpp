@@ -9,7 +9,7 @@
 #include <afina/Version.h>
 #include <afina/network/Server.h>
 
-#include "network/blocking/ServerImpl.h"
+//#include "network/blocking/ServerImpl.h"
 #include "network/nonblocking/ServerImpl.h"
 //#include "network/uv/ServerImpl.h"
 #include "storage/MapBasedGlobalLockImpl.h"
@@ -54,6 +54,8 @@ int main(int argc, char **argv) {
         options.add_options()("max_queue_size", "Max threadpool queue size (default = 1) ", cxxopts::value<int>());
         options.add_options()("idle_time", "Worker idle time(ms) (default = 100) ", cxxopts::value<int>());
         options.add_options()("w,workers", "Workers number (default = 1) ", cxxopts::value<int>());
+        options.add_options()("r-fifo", "Fifo file for read (not set by default)", cxxopts::value<std::string>());
+        options.add_options()("w-fifo", "File for answers from fifo (set to /dev/null by default)", cxxopts::value<std::string>());
         options.add_options()("h,help", "Print usage info");
         options.parse(argc, argv);
 
@@ -137,7 +139,28 @@ int main(int argc, char **argv) {
         workers_cnt = options["workers"].as<int>();
     }
 
+    std::string r_fifo;
+    if (options.count("r-fifo") > 0) {
+        r_fifo = options["r-fifo"].as<std::string>();
+    }
+
+    std::string w_fifo = "/dev/null";
+    if (options.count("w-fifo") > 0) {
+        if (!r_fifo.size()) {
+            std::cerr << "--r-fifo must be initialized, see -h for help" << std::endl;
+            return 1;
+        }
+        w_fifo = options["w-fifo"].as<std::string>();
+    }
+
     try {
+        if (r_fifo.size()) {
+            if (!app.server->StartFIFO(r_fifo, w_fifo)) {
+                std::cerr << "Can not create fifo file" << std::endl;
+                return 1;
+            }
+        }
+
         app.storage->Start();
 
         app.server->Start(8080, workers_cnt);

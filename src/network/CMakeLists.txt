@@ -3,7 +3,7 @@ set(SOURCE_FILES
     #uv/ServerImpl.cpp
     #uv/Worker.cpp
 
-    blocking/ServerImpl.cpp
+    #blocking/ServerImpl.cpp
 
     nonblocking/ServerImpl.cpp
     nonblocking/Worker.cpp

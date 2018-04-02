@@ -102,7 +102,7 @@ class Worker {
 public:
     using storage_type = std::shared_ptr<Afina::Storage>;
     //Worker(): storage(-1ll) {}
-    explicit Worker(std::shared_ptr<Afina::Storage> ps);
+    Worker(std::shared_ptr<Afina::Storage> ps, const std::pair<int, int>& fifo);
     Worker(Worker&&) = default;
     ~Worker();
 
@@ -133,13 +133,15 @@ protected:
     /**
      * Method executing by background thread
      */
-    void OnRun(int server_socket, int worker_number);
+    void OnRun(int server_socket, int r_fifo, int worker_number);
 
 private:
-    std::thread thread;
     std::unordered_map<int, Task> tasks;
 
     std::shared_ptr<Afina::Storage> storage;
+
+    // File handlers for fifo (read and write)
+    std::pair<int, int> fifo;
 };
 
 } // namespace NonBlocking
