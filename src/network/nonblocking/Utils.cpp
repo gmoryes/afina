@@ -61,11 +61,11 @@ bool Socket::Read(std::string &out) {
 
     Logger& logger = Logger::Instance();
 
-    char buffer[32];
+    char buffer[BUFFER_SIZE];
     ssize_t has_read = 0;
 
     size_t parsed = 0;
-    has_read = read(_read_fh, buffer, 32);
+    has_read = read(_read_fh, buffer, BUFFER_SIZE);
     if (!has_read) {
         _closed = true;
         return false;
@@ -117,7 +117,7 @@ bool Socket::Read(std::string &out) {
             parser.Reset();
             return true;
         }
-    } while ((has_read = read(_read_fh, buffer, 32)) > 0);
+    } while ((has_read = read(_read_fh, buffer, BUFFER_SIZE)) > 0);
 
     if (!(has_read < 0 && errno == EAGAIN)) {
         logger.write("Error during read from socket(", _read_fh, "), errno =", errno);
