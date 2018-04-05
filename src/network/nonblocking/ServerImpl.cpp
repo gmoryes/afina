@@ -15,6 +15,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <sys/stat.h>
 
 #include <afina/Storage.h>
 
@@ -34,8 +35,63 @@ ServerImpl::ServerImpl(std::shared_ptr<Afina::Storage> ps):
 // See Server.h
 ServerImpl::~ServerImpl() {}
 
-bool ServerImpl::StartFIFO(const std::string& r_fifo_name, const std::string& w_fifo_name) {
+bool delete_if_need(const std::string& name, bool force) {
     Logger& logger = Logger::Instance();
+
+    if (name == "/dev/null")
+        return true;
+
+    if (is_file_exists(name)) {
+        logger.write("File:", name, "already exists");
+        logger.write("Going to unlink it");
+        if (unlink(name.c_str()) < 0) {
+            logger.write("unlink() -1, errno =", errno);
+            return false;
+        } else {
+            return true;
+        }
+    }
+}
+
+bool ServerImpl::StartFIFO(const std::string& r_fifo_name,
+                           const std::string& w_fifo_name,
+                           bool force) {
+
+    Logger& logger = Logger::Instance();
+
+    delete_if_need(r_fifo_name, force);
+    delete_if_need(w_fifo_name, force);
+
+    if (mkfifo(r_fifo_name.c_str(), 0666) < 0) {
+        logger.write("mkfifo()1 -1, errno =", errno);
+        return false;
+    }
+
+    if (mkfifo(w_fifo_name.c_str(), 0666) < 0) {
+        logger.write("mkfifo()2 -1, errno =", errno);
+        return false;
+    }
+
+    r_fifo = open(r_fifo_name.c_str(), O_RDWR);
+    if (r_fifo < 0) {
+        logger.write("Can not open file:", r_fifo_name,
+                     "for O_RDWR, errno =", errno);
+        return false;
+    }
+
+    w_fifo = open(w_fifo_name.c_str(), O_RDWR);
+    if (w_fifo < 0) {
+        logger.write("Can not open file:", w_fifo_name,
+                     "for O_RDWR, errno =", errno);
+        return false;
+    }
+
+    make_socket_non_blocking(r_fifo);
+    make_socket_non_blocking(w_fifo);
+
+    return true;
+
+    return false;
 
     r_fifo = open(r_fifo_name.c_str(), O_RDONLY);
     if (r_fifo <= 0) {

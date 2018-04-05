@@ -4,6 +4,7 @@ generated/*
 # local cmake builds
 /build
 /cmake-build-debug
+/asan-build
 
 # local config use to test changes
 config/_local.conf

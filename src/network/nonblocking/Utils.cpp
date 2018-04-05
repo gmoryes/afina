@@ -1,6 +1,7 @@
 #include "Utils.h"
 
 #include <stdexcept>
+#include <algorithm>
 
 #include <fcntl.h>
 #include <sys/epoll.h>
@@ -17,15 +18,18 @@ namespace NonBlocking {
 
 void make_socket_non_blocking(int sfd) {
     int flags, s;
+    Logger& logger = Logger::Instance();
 
     flags = fcntl(sfd, F_GETFL, 0);
     if (flags == -1) {
+        logger.write("fcntl() -1, 1, errno =", errno, "fd =", sfd);
         throw std::runtime_error("Failed to call fcntl to get socket flags");
     }
 
     flags |= O_NONBLOCK;
     s = fcntl(sfd, F_SETFL, flags);
     if (s == -1) {
+        logger.write("fcntl() -1, 2, errno =", errno, "fd =", sfd);
         throw std::runtime_error("Failed to call fcntl to set socket flags");
     }
 }
@@ -35,10 +39,19 @@ bool is_file_exists(const std::string& name) {
     return (stat(name.c_str(), &buffer) == 0);
 }
 
-Socket::Socket(int fh) : _fh(fh),
-                         _socket_error(false),
-                         _internal_error(false),
-                         _closed(false) {}
+Socket::Socket(int read_fh, int write_fh = -1):
+    _read_fh(read_fh),
+    _socket_error(false),
+    _internal_error(false),
+    _all_data_send(true),
+    _closed(false) {
+
+    if (write_fh == -1) {
+        _write_fh  = read_fh;
+    } else {
+        _write_fh = write_fh;
+    }
+}
 
 bool Socket::is_closed() {
     return _closed;
@@ -52,7 +65,7 @@ bool Socket::Read(std::string &out) {
     ssize_t has_read = 0;
 
     size_t parsed = 0;
-    has_read = read(_fh, buffer, 32);
+    has_read = read(_read_fh, buffer, 32);
     if (!has_read) {
         _closed = true;
         return false;
@@ -68,14 +81,12 @@ bool Socket::Read(std::string &out) {
 
         out += std::string(buffer, buffer + has_read);
 
-        logger.write("Current buffer:", out);
-
         size_t cur_parsed;
         bool find_command;
         try {
             find_command = parser.Parse(std::string(out.data() + parsed), cur_parsed);
         } catch (std::runtime_error& error) {
-            logger.write("Error during parser.Parce(), desc:", error.what());
+            logger.write("Error during parser.Parse(), desc:", error.what());
             _internal_error = true;
             return false;
         }
@@ -106,10 +117,10 @@ bool Socket::Read(std::string &out) {
             parser.Reset();
             return true;
         }
-    } while ((has_read = read(_fh, buffer, 32)) > 0);
+    } while ((has_read = read(_read_fh, buffer, 32)) > 0);
 
     if (!(has_read < 0 && errno == EAGAIN)) {
-        logger.write("Error during read from socket(", _fh, "), errno =", errno);
+        logger.write("Error during read from socket(", _read_fh, "), errno =", errno);
         _socket_error = true;
     }
 
@@ -124,39 +135,65 @@ bool Socket::internal_error() const {
     return _internal_error;
 }
 
+bool Socket::is_all_data_send() {
+    if (_all_data_send) {
+        _all_data_send = false;
+        return true;
+    } else {
+        return false;
+    }
+}
+
 bool Socket::Write(std::string &out) {
+
+    if (!out.size()) {
+        _all_data_send = true;
+        return false;
+    }
+
     Logger& logger = Logger::Instance();
 
     int has_send_all = 0;
     ssize_t has_send_now;
-    bool result = false;
+    bool success = false;
 
     while (has_send_all != out.size()) {
 
-        has_send_now = send(_fh, out.data(), out.size(), 0);
+        has_send_now = send(
+            _write_fh,
+            out.data() + has_send_all,
+            std::min(size_t(4096), size_t(out.size() - has_send_all)),
+            0
+        );
+
+        if (has_send_now > 0) {
+            // Send ok
+            logger.write("Write to", _write_fh, has_send_now);
+            has_send_all += has_send_now;
+            success = true;
+            continue;
+        }
 
         if (has_send_now < 0 && errno == EAGAIN) {
             // Write again later
-            logger.write("Socket(", _fh, ")_ is overhead now");
-            result = true;
+            logger.write("Socket(", _write_fh, ")_ is overhead now");
+            success = true;
         } else if (has_send_now < 0 && errno != EAGAIN) {
             // send return -1, but errno != EAGAIN => error
             _socket_error = true;
-            logger.write("Error during send data to socket(", _fh, "), errno = ", errno);
-        } else if (has_send_now > 0) {
-            // Send ok
-            logger.write("Write to", _fh, has_send_now);
-            has_send_all += has_send_now;
-            result = true;
+            logger.write("Error during send data to socket(", _write_fh, "), errno = ", errno);
+            success = false;
         } else {
             // Send return zero => socket is closed
             _closed = true;
+            success = false;
         }
+        break;
     }
 
     // Delete data, that we has sent
     out.erase(out.begin(), out.begin() + has_send_all);
-    return result;
+    return success;
 }
 
 } // namespace NonBlocking

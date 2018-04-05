@@ -24,7 +24,7 @@ public:
     // See Server.h
     void Start(uint32_t, uint16_t) override;
     void StartThreadPool(size_t, size_t, size_t, size_t) override;
-    bool StartFIFO(const std::string& r_fifo, const std::string& w_fifo) override;
+    bool StartFIFO(const std::string& r_fifo, const std::string& w_fifo, bool force) override;
 
     // See Server.h
     void Stop() override;

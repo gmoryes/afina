@@ -16,7 +16,9 @@ void make_socket_non_blocking(int sfd);
 // Class Socket for read all data from it
 class Socket {
 public:
-    explicit Socket(int fh);
+
+    // write_fh equal to read_fh by default
+    Socket(int read_fh, int write_fh);
     ~Socket() = default;
 
     // Read data from socket, return true is find command
@@ -34,11 +36,15 @@ public:
     // Check if socket closed
     bool is_closed();
 
+    // Check if we has sent all data, for set down EPOLLOUT flag
+    bool is_all_data_send();
+
     Protocol::Parser::Command command;
     std::string& Body() { return body; }
 
 private:
-    int _fh;
+    int _read_fh;
+    int _write_fh;
 
     // Was error during operations with socket
     bool _socket_error;
@@ -48,6 +54,9 @@ private:
 
     // Is socket closed
     bool _closed;
+
+    // Is all data has sent
+    bool _all_data_send;
 
     Protocol::Parser parser;
 

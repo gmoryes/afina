@@ -54,13 +54,19 @@ void Worker::OnRun(int server_socket, int r_fifo, int worker_number) {
     // Add server socket
     ev.data.fd = server_socket;
     ev.events = EPOLLIN;
-    epoll_ctl(epoll_fd, EPOLL_CTL_ADD, server_socket, &ev);
+    if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, server_socket, &ev) < 0) {
+        logger.write("epoll_ctl() return -1, errno =", errno);
+        return;
+    }
 
     // Add fifo if need
     if (fifo.first != -1) {
         ev.data.fd = fifo.first;
         ev.events = EPOLLIN | EPOLLEXCLUSIVE;
-        epoll_ctl(epoll_fd, EPOLL_CTL_ADD, fifo.first, &ev);
+        if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, fifo.first, &ev) < 0) {
+            logger.write("epoll_ctl() return -1, errno =", errno);
+            return;
+        }
     }
 
     int events_count;
@@ -78,19 +84,25 @@ void Worker::OnRun(int server_socket, int r_fifo, int worker_number) {
                     logger.write("accept() return -1, errno:", errno);
                     continue;
                 }
+
+                logger.write("Get new client =", client);
                 make_socket_non_blocking(client);
                 ev.data.fd = client;
-                ev.events = EPOLLIN;
+                ev.events = EPOLLIN | EPOLLHUP;
 
                 epoll_ctl(epoll_fd, EPOLL_CTL_ADD, client, &ev);
 
-                tasks.insert(std::make_pair(client, std::move(Task(client))));
+                tasks.emplace(client, std::move(Task(client)));
             } else {
                 auto& task = tasks[socket_fh];
                 task.process(storage, events[i].events);
                 if (task.can_be_deleted()) {
                     epoll_ctl(epoll_fd, EPOLL_CTL_DEL, socket_fh, &ev);
                     tasks.erase(socket_fh);
+                } else if (task.epoll_flags()) {
+                    uint32_t flags = task.epoll_flags(0);
+                    ev.events = flags;
+                    epoll_ctl(epoll_fd, EPOLL_CTL_MOD, socket_fh, &ev);
                 }
             }
         }

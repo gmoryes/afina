@@ -93,7 +93,7 @@ int main(int argc, char **argv) {
     if (network_type == "uv") {
         //app.server = std::make_shared<Afina::Network::UV::ServerImpl>(app.storage);
     } else if (network_type == "blocking") {
-        app.server = std::make_shared<Afina::Network::Blocking::ServerImpl>(app.storage);
+        //app.server = std::make_shared<Afina::Network::Blocking::ServerImpl>(app.storage);
     } else if (network_type == "nonblocking") {
         app.server = std::make_shared<Afina::Network::NonBlocking::ServerImpl>(app.storage);
     } else {

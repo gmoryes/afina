@@ -28,7 +28,7 @@ public:
                                  size_t hight_watermark = 1,
                                  size_t max_queue_size = 1,
                                  size_t idle_time = 100) = 0;
-    virtual bool StartFIFO(const std::string&, const std::string&) = 0;
+    virtual bool StartFIFO(const std::string&, const std::string&, bool force = true) = 0;
 
     /**
      * Signal all worker threads that server is going to shutdown. After method returns

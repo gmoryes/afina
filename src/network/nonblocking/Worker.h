@@ -24,24 +24,50 @@ namespace NonBlocking {
  */
 class Task {
 public:
-    Task():client_fh(-1), _should_end(false) {};
-    Task(Task&& from) {
-        client_fh = from.client_fh;
-        from.client_fh = -1;
+    Task():read_fh(-1), write_fh(-1), _should_end(false), _flags(0) {};
+    Task(Task&& from) noexcept {
+        read_fh = from.read_fh;
+        write_fh = from.write_fh;
+        _flags = from._flags;
 
-        buffer = from.buffer;
-        need_write = from.need_write;
+        from.write_fh = -1;
+        from.read_fh = -1;
+        from._flags = 0;
+
+        buffer = std::move(from.buffer);
+        need_write = std::move(from.need_write);
         _should_end = from._should_end;
     }
-    Task(int client_fh): client_fh(client_fh), _should_end(false) {}
+    Task(int client_fh, int write_fh = -1):
+        read_fh(client_fh),
+        _should_end(false),
+        _flags(0) {
+
+        if (write_fh == -1) {
+            this->write_fh = client_fh;
+        } else {
+            this->write_fh = write_fh;
+        }
+    }
     ~Task() {
-        close(client_fh);
+        close(read_fh);
+        if (read_fh != write_fh)
+            close(write_fh);
     }
 
     void process(const std::shared_ptr<Afina::Storage> &ps, uint32_t events) {
         Logger &logger = Logger::Instance();
 
-        Socket socket(client_fh);
+        Socket socket(read_fh, write_fh);
+
+        if (events & EPOLLIN)
+            logger.write("EPOLLIN(", EPOLLIN, ")");
+        if (events & EPOLLOUT)
+            logger.write("EPOLLOUT(", EPOLLOUT, ")");
+        if (events & EPOLLHUP)
+            logger.write("EPOLLHUP(", EPOLLHUP, ")");
+        logger.write("events:", events);
+
 
         if (events & EPOLLIN || events & EPOLLOUT) {
             // If we have some data to read/write
@@ -57,18 +83,22 @@ public:
                     socket.command->Execute(*ps, socket.Body(), need_write);
                     need_write += "\r\n";
                     socket.Write(need_write);
+                    _flags = EPOLLOUT;
                 }
             } else {
                 if (socket.socket_error()) {
                     // need delete from epoll
                     _should_end = true;
-                    logger.write("Error while processing socket:", client_fh);
+                    logger.write("Error while processing socket:", read_fh);
                 } else if (socket.internal_error()) {
                     need_write = "SERVER_ERROR Internal Error\r\n";
                     socket.Write(need_write);
                 } else if (socket.is_closed()) {
                     _should_end = true;
                     logger.write("No data anymore");
+                } else if(socket.is_all_data_send()) {
+                    _flags = EPOLLIN | EPOLLHUP;
+                    logger.write("Data send, can set dawn EPOLLOUT flag");
                 } else {
                     logger.write("WTF! I don't know what's happening now!");
                 }
@@ -84,13 +114,32 @@ public:
     bool can_be_deleted() const {
         return _should_end;
     }
+
+    bool has_data_to_send() const {
+        return !need_write.empty();
+    }
+
+    uint32_t epoll_flags(int op = -1) {
+        if (op == -1) {
+            return _flags;
+        } else {
+            int save = _flags;
+            _flags = 0;
+            return save;
+        }
+    }
 private:
-    int client_fh;
+    int read_fh;
+
+    // Equal to read_fh by default, case for FIFO files
+    int write_fh;
 
     std::string buffer;
     std::string need_write;
 
     bool _should_end;
+
+    uint32_t _flags;
 };
 
 /**
