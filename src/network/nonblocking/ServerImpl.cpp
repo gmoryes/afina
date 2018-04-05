@@ -78,12 +78,10 @@ void ServerImpl::Start(uint32_t port, uint16_t n_workers) {
         throw std::runtime_error("Socket listen() failed");
     }
 
+    workers.reserve(n_workers);
     for (int i = 0; i < n_workers; i++) {
         workers.emplace_back(pStorage);
-    }
-
-    for (int i = 0; i < n_workers; i++) {
-        workers[i].Start(server_socket, i);
+        workers.back().Start(server_socket, i);
     }
 
 }

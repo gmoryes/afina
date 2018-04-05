@@ -5,6 +5,11 @@
 #include <protocol/Parser.h>
 #include <afina/execute/Command.h>
 
+/* Look at /proc/sys/net/ipv4/tcp_rmem and /proc/sys/net/ipv4/tcp_wmem
+ * Min size of buffer is set to 4096, so let it 4096 in programm
+ */
+#define BUFFER_SIZE 4096
+
 namespace Afina {
 namespace Network {
 namespace NonBlocking {
