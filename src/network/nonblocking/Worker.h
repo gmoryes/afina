@@ -19,6 +19,8 @@ class Storage;
 namespace Network {
 namespace NonBlocking {
 
+using namespace Utils;
+
 /**
  * Class of processing tasks, the worker call process() from epoll
  */
@@ -73,7 +75,7 @@ public:
             // If we have some data to read/write
             bool success;
             if (events & EPOLLIN) {
-                success = socket.Read(buffer);
+                success = socket.SmartRead(buffer);
             } else {
                 success = socket.Write(need_write);
             }
@@ -123,7 +125,7 @@ public:
         if (op == -1) {
             return _flags;
         } else {
-            int save = _flags;
+            uint32_t save = _flags;
             _flags = 0;
             return save;
         }
@@ -134,7 +136,7 @@ private:
     // Equal to read_fh by default, case for FIFO files
     int write_fh;
 
-    std::string buffer;
+    SmartString buffer;
     std::string need_write;
 
     bool _should_end;

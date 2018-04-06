@@ -9,7 +9,6 @@
 #include <afina/Version.h>
 #include <afina/network/Server.h>
 
-//#include "network/blocking/ServerImpl.h"
 #include "network/nonblocking/ServerImpl.h"
 //#include "network/uv/ServerImpl.h"
 #include "storage/MapBasedGlobalLockImpl.h"

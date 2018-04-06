@@ -23,6 +23,9 @@
 #include "Worker.h"
 
 namespace Afina {
+
+using namespace Utils;
+
 namespace Network {
 namespace NonBlocking {
 
@@ -88,22 +91,6 @@ bool ServerImpl::StartFIFO(const std::string& r_fifo_name,
 
     make_socket_non_blocking(r_fifo);
     make_socket_non_blocking(w_fifo);
-
-    return true;
-
-    return false;
-
-    r_fifo = open(r_fifo_name.c_str(), O_RDONLY);
-    if (r_fifo <= 0) {
-        logger.write("Can not open file", r_fifo_name, "errno =", errno);
-        return false;
-    }
-
-    w_fifo = open(w_fifo_name.c_str(), O_WRONLY);
-    if (w_fifo <= 0) {
-        logger.write("Can not open file", w_fifo_name, "errno =", errno);
-        return false;
-    }
 
     return true;
 }

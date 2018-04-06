@@ -8,7 +8,12 @@
 #include <cstddef>
 #include <cstdint>
 
+#include <network/nonblocking/Utils.h>
+
 namespace Afina {
+
+using namespace Utils;
+
 namespace Execute {
 class Command;
 } // namespace Execute
@@ -30,7 +35,7 @@ public:
      * @param parsed output parameter tells how many bytes was consumed from the string
      * @return true if command has been parsed out
      */
-    bool Parse(const std::string &input, size_t &parsed) { return Parse(&input[0], input.size(), parsed); }
+    //bool Parse(const std::string &input, size_t &parsed) { return Parse(&input[0], input.size(), parsed); }
 
     /**
      * Push given string into parser input. Method returns true if it was a command parsed out
@@ -41,7 +46,7 @@ public:
      * @param parsed output parameter tells how many bytes was consumed from the string
      * @return true if command has been parsed out
      */
-    bool Parse(const char *input, const size_t size, size_t &parsed);
+    bool Parse(SmartString& input, const size_t size, size_t &parsed);
 
     /**
      * Builds new command from parsed input. In case if it wasn't enough input to prse command out

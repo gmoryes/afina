@@ -13,9 +13,9 @@ void Set::Execute(Storage &storage, const std::string &args, std::string &out) {
     logger.write("Set(", _key, "):", args);
     storage.Put(_key, args);
     out = "STORED";
-    for (int i = 0; i < 1000000; i++) {
-        out += "aaaaaaaaaaaaaaa";
-    }
+//    for (int i = 0; i < 1000000; i++) {
+//        out += "aaaaaaaaaaaaaaa";
+//    }
 }
 
 } // namespace Execute

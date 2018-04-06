@@ -12,14 +12,19 @@
 #include <afina/execute/Set.h>
 #include <afina/execute/Stats.h>
 
+#include <network/nonblocking/Utils.h>
+
 namespace Afina {
+
+using namespace Utils;
+
 namespace Protocol {
 
 Parser::~Parser() = default;
 Parser::Parser() { Reset(); }
 
 // See Parse.h
-bool Parser::Parse(const char *input, const size_t size, size_t &parsed) {
+bool Parser::Parse(SmartString& input, const size_t size, size_t &parsed) {
     size_t pos;
     parsed = 0;
 
@@ -148,7 +153,7 @@ bool Parser::Parse(const char *input, const size_t size, size_t &parsed) {
                 parse_complete = true;
             } else {
                 std::stringstream err;
-                err << "Invalid char " << (int)c << " at position " << (parsed + pos) << ", \\n expected";
+                err << "Invalid char " << int(c) << " at position " << (parsed + pos) << ", \\n expected";
                 throw std::runtime_error(err.str());
             }
             break;

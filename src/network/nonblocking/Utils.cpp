@@ -13,8 +13,7 @@
 #include <logger/Logger.h>
 
 namespace Afina {
-namespace Network {
-namespace NonBlocking {
+namespace Utils {
 
 void make_socket_non_blocking(int sfd) {
     int flags, s;
@@ -84,7 +83,7 @@ bool Socket::Read(std::string &out) {
         size_t cur_parsed;
         bool find_command;
         try {
-            find_command = parser.Parse(std::string(out.data() + parsed), cur_parsed);
+            //find_command = parser.Parse(out.data(), out.size(), cur_parsed);
         } catch (std::runtime_error& error) {
             logger.write("Error during parser.Parse(), desc:", error.what());
             _internal_error = true;
@@ -125,6 +124,69 @@ bool Socket::Read(std::string &out) {
     }
 
     return false;
+}
+
+bool Socket::SmartRead(SmartString& out) {
+    Logger& logger = Logger::Instance();
+
+    ssize_t has_read = 0;
+    char buffer[BUFFER_SIZE];
+
+    while ((has_read = read(_read_fh, buffer, BUFFER_SIZE)) > 0) {
+        logger.write("Has read", has_read, "bytes from socket:", _read_fh);
+
+        out.Put(buffer);
+
+        size_t cur_parsed;
+        bool find_command;
+        try {
+            find_command = parser.Parse(out, out.size(), cur_parsed);
+        } catch (std::runtime_error& error) {
+            logger.write("Error during parser.Parse(), desc:", error.what());
+            _internal_error = true;
+            return false;
+        }
+
+        out.Erase(cur_parsed);
+
+        if (find_command) { // Get command
+
+            uint32_t body_size;
+            try {
+                command = parser.Build(body_size);
+            } catch (std::runtime_error& error) {
+                logger.write("Error during Build(), desc:", error.what());
+                _internal_error = true;
+                return false;
+            }
+
+            body_size = (body_size == 0) ? body_size : body_size + 2; // \r\n
+
+            if (out.size() < body_size)
+                continue; // Read not enough, try again
+
+            body = out.Copy(body_size); // Copy body from read buffer to current body
+            out.Erase(body_size);       // Delete body from read buffer
+
+            parser.Reset(); // Delete data, that we has parsed
+            return true;
+        }
+    }
+
+    if (has_read < 0) {
+        if (errno == EAGAIN) {
+            logger.write("Socket is overloaded, wait...");
+            return true;
+        } else {
+            logger.write("Error during read(), errno =", errno);
+            _socket_error = true;
+            return false;
+        }
+    } else {
+        logger.write("Client close connection, goodbye");
+        _closed = true;
+        return false;
+    }
 }
 
 bool Socket::socket_error() const {
@@ -196,6 +258,85 @@ bool Socket::Write(std::string &out) {
     return success;
 }
 
-} // namespace NonBlocking
-} // namespace Network
+SmartString::SmartString(const char *buffer) : SmartString() {
+    size_t len = strlen(buffer);
+    _size = len;
+    _end_pos = _size;
+
+    _string = new char[len];
+    std::memcpy(_string, buffer, len);
+}
+
+void SmartString::Put(const char *put_string) {
+    size_t put_length = strlen(put_string);
+
+    if (_free_size >= put_length) {
+        // Если у нас есть место для новой строки
+        for (size_t i = 0; i < put_length; i++)
+            _string[(_end_pos + i) % _size] = put_string[i];
+
+        _end_pos += put_length;
+        _end_pos %= _size;
+        _free_size -= put_length;
+    } else {
+        // Выделяем новую память в размере того, что нам не хватило
+        auto new_string = new char[_size + put_length - _free_size];
+
+        // Выделили памяти больше, теперь скопируем нашу непонятно как
+        // лежащую строку в нормальном порядке в новую память
+        for (size_t i = 0; i < _size; i++)
+            new_string[i] = _string[(_start_pos + i) % _size];
+
+        // Удаляем старую память
+        if (_string)
+            delete[] _string;
+        _string = new_string;
+
+        // Вычисляем конец строки (конечная позиция - это
+        // вся память минус то, что было свободно)
+        _end_pos = _size - _free_size;
+
+        // Новый размер - это старый плюс то, что добавили
+        _size = _size + put_length - _free_size;
+
+        // Строка начинается теперь с 0
+        _start_pos = 0;
+
+        // Копируем строку, которую надо добавить
+        // в конец нашей новой строки
+        std::memcpy(_string + _end_pos, put_string, put_length);
+
+        // Конец в конце :/
+        _end_pos = _size;
+
+        // Свободного места у нас нет
+        _free_size = 0;
+    }
+}
+
+void SmartString::Erase(size_t n_bytes) {
+    size_t used_memory = _size - _free_size;
+    if (n_bytes >= _size || n_bytes >= used_memory) {
+        _start_pos = 0;
+        _end_pos = 0;
+        _free_size = _size;
+        return;
+    }
+
+    // n_bytes < _size and n_bytes < used_memory
+    // So we just move _start_pos for n_bytes
+    _start_pos = (_start_pos + n_bytes) % _size;
+    _free_size += n_bytes;
+}
+
+std::string SmartString::Copy(size_t n_bytes) {
+    std::string result;
+    result.reserve(n_bytes);
+
+    for (size_t i = 0; i < n_bytes; i++)
+        result.push_back(_string[(_start_pos + i) % _size]);
+
+    return result;
+}
+} // namespace Utils
 } // namespace Afina

@@ -9,10 +9,17 @@
 #include <cstdint>
 
 namespace Afina {
+
+namespace Utils {
+class SmartString;
+}
+
 namespace Execute {
 class Command;
 } // namespace Execute
 namespace Protocol {
+
+using namespace Utils;
 
 /**
  * # Memcached protocol parser
@@ -28,21 +35,11 @@ public:
      * from cumulative input. In a such case method Build will return new command
      *
      * @param input string to be added to the parsed input
-     * @param parsed output parameter tells how many bytes was consumed from the string
-     * @return true if command has been parsed out
-     */
-    bool Parse(const std::string &input, size_t &parsed) { return Parse(&input[0], input.size(), parsed); }
-
-    /**
-     * Push given string into parser input. Method returns true if it was a command parsed out
-     * from cumulative input. In a such case method Build will return new command
-     *
-     * @param input string to be added to the parsed input
      * @param size number of bytes in the input buffer that could be read
      * @param parsed output parameter tells how many bytes was consumed from the string
      * @return true if command has been parsed out
      */
-    bool Parse(const char *input, const size_t size, size_t &parsed);
+    bool Parse(SmartString& input, size_t size, size_t &parsed);
 
     /**
      * Builds new command from parsed input. In case if it wasn't enough input to parse command out
