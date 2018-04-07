@@ -53,7 +53,7 @@ public:
     void Reset();
 
     inline const std::string &Name() const { return name; }
-
+    uint32_t GetBodySize() const { return bytes; }
 
 private:
     /**

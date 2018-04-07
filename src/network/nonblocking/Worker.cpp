@@ -13,6 +13,7 @@
 #include <sstream>
 #include <utility>
 #include <logger/Logger.h>
+#include "EventLoop.h"
 
 #define EPOLL_SIZE 10000
 
@@ -32,8 +33,98 @@ Worker::~Worker() {
     stop = false;
 }
 
-// See Worker.h
+bool writer(Worker &worker, EventTask& event_task, int has_written) {
+    Logger& logger = Logger::Instance();
+
+    logger.write("Wrote", has_written, "bytes in socket:", event_task.write_fh());
+    return true;
+}
+
+bool reader(Worker& worker,
+            std::shared_ptr<Protocol::Parser>& parser,
+            SmartString& buffer,
+            EventTask& event_task) {
+
+    Logger& logger = Logger::Instance();
+
+    size_t cur_parsed;
+    bool find_command;
+    try {
+        find_command = parser->Parse(buffer, buffer.size(), cur_parsed);
+    } catch (std::runtime_error& error) {
+        logger.write("Error during parser.Parse(), desc:", error.what());
+        return false;
+    }
+
+    buffer.Erase(cur_parsed);
+
+    if (find_command) { // Get command
+
+        uint32_t body_size = parser->GetBodySize();
+        body_size = (body_size == 0) ? body_size : body_size + 2; // \r\n
+
+        if (buffer.size() < body_size)
+            return true; // Read not enough, try again
+
+        Protocol::Parser::Command command;
+        try {
+            command = parser->Build(body_size);
+        } catch (std::runtime_error& error) {
+            logger.write("Error during Build(), desc:", error.what());
+            return false;
+        }
+
+        buffer.Erase(body_size); // Delete body from read buffer
+        parser->Reset(); // Delete data, that we has parsed
+
+        std::string must_be_written;
+        command->Execute(*(worker.storage), buffer.Copy(body_size), must_be_written);
+
+        //worker.event_loop.async_write(
+        worker.event_loop.async_write(must_be_written, &event_task);
+
+        return true;
+    }
+}
+
+bool acceptor(Worker& worker, int client_fh) {
+
+    Logger& logger = Logger::Instance();
+    logger.write("Accept new client:", client_fh);
+
+    using namespace std::placeholders;
+
+    auto new_parser = std::make_shared<Protocol::Parser>();
+    worker.parsers.push_back(new_parser);
+
+    auto bind_reader = std::bind(reader, new_parser, _1);
+    worker.event_loop.async_read(client_fh, bind_reader);
+
+    return true;
+}
+
 void Worker::OnRun(int server_socket, int r_fifo, int worker_number) {
+    using namespace std::placeholders;
+
+    Logger &logger = Logger::Instance();
+
+    std::stringstream ss;
+    ss << "WORKER_" << worker_number;
+    logger.i_am(ss.str());
+
+    logger.write("Hello");
+
+    event_loop.Start(EPOLL_SIZE);
+
+    SharedParsers parsers;
+
+    auto bind_acceptor = std::bind(acceptor, *this, _1);
+    event_loop.async_accept(server_socket, bind_acceptor);
+    event_loop.loop();
+}
+
+// See Worker.h
+void Worker::OnRunOld(int server_socket, int r_fifo, int worker_number) {
     Logger& logger = Logger::Instance();
 
     std::stringstream ss;
@@ -135,7 +226,6 @@ void Worker::Join() {
     std::cout << "network debug: " << __PRETTY_FUNCTION__ << std::endl;
     // TODO: Nothing here lol
 }
-
 
 } // namespace NonBlocking
 } // namespace Network
