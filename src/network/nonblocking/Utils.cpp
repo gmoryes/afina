@@ -338,5 +338,15 @@ std::string SmartString::Copy(size_t n_bytes) {
 
     return result;
 }
+
+SmartString::SmartString(SmartString &&from) {
+    _string = from._string;
+    from._string = nullptr;
+
+    _size = from._size;
+    _free_size = from._free_size;
+    _start_pos = from._start_pos;
+    _end_pos = from._end_pos;
+}
 } // namespace Utils
 } // namespace Afina

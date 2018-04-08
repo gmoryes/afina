@@ -7,6 +7,8 @@
 #include <sys/epoll.h>
 #include <queue>
 #include <string>
+#include <unordered_map>
+#include <unistd.h>
 
 #include "Utils.h"
 
@@ -33,46 +35,44 @@ namespace NonBlocking {
 // То, что приписывается каждому filehandlr'у
 class EventTask {
 public:
-    EventTask(int read_fh, int write_fh = -1): read_buffer(), _is_server(false), _read_fh(read_fh) {
-        if (write_fh != -1)
-            _write_fh = write_fh;
-        else
-            _write_fh = _read_fh;
+    explicit EventTask(int fd): read_buffer(), fd(fd) {}
+    ~EventTask() {
+        close(fd);
     }
-    EventTask(int read_fh, bool is_server, int write_fh = -1): EventTask(read_fh, write_fh), _is_server(is_server) {}
 
     /**
-     * Вызывается после, того,  как epoll_wait вернул наше событие
+     * Вызывается после, того, как epoll_wait вернул наше событие
      * @param flags - Флаг от epoll
+     * @return - true, если событие надо оставить в epoll, false - иначе
      */
-    void process(uint32_t flags);
+    bool process(uint32_t flags);
 
     void add_acceptor(std::function<bool(int)>&& function) {
         acceptor = std::move(function);
     }
 
-    void add_reader(std::function<bool(SmartString&, EventTask&)>&& function) {
+    void add_reader(std::function<bool(int, SmartString&)>&& function) {
         reader = std::move(function);
     }
 
-    void add_writer(std::function<bool(int)>&& function) {
-        if (not writer)
+    //void add_writer(std::function<bool(int)>&& function) {}
 
+    bool message_queue_empty() const {
+        return write_queue_messages.empty();
+    }
+    void add_message_to_write(std::string& message) {
+        write_queue_messages.emplace(message);
     }
 
-    int write_fh() const {
-        return _write_fh;
-    }
+    int fd;
+    static int epoll_fh; // Initialized in EventLoop::Start()
 private:
-    SmartString& read_buffer;
-    std::queue<SmartString&> must_be_written;
-    bool _is_server;
+    SmartString read_buffer;
+    std::queue<SmartString> write_queue_messages;
 
-    int _read_fh;
-    int _write_fh;
     std::function<bool(int)> acceptor;
-    std::function<bool(SmartString&, EventTask&)> reader;
-    std::function<bool(int)> writer;
+    std::function<bool(int, SmartString&)> reader;
+    //std::function<bool(int)> writer;
 };
 
 class EventLoop {
@@ -96,21 +96,22 @@ public:
      * Ассинхронно принимает новые соединения
      * @param server_socket - серверный сокет, который мы слушаем
      * @param func - функция, которая вызовется в случае нового соединеия
-     * @param client_fh - новый сокет от клиента
      */
-    void async_accept(int server_socket, std::function<bool(int)>&& func);
+    void async_accept(int server_socket, std::function<bool(int)> func);
 
     /**
      * Асинхронно читает
-     * @param read_fh - откуда читать
-     * @param func - то, что вызовется, когда чтение окончится
-     * @param buffer - буффер, куда будет сохранена считанная информация
+     * @param fd - откуда читать
+     * @param func - bool(int, SmartString&) - пользовательский callback который вызывается каждый
+     *               раз при считывании, в нее передается fd с которого произошло чтение
+     *               и SmartString& - то, что смогли считать
      */
-    void async_read(int read_fh, std::function<bool(SmartString&, EventTask&)>&& func);
+    void async_read(int fd, std::function<bool(int, SmartString&)> func);
 
-    void async_write(std::string& must_be_written, EventTask* event_task);
+    void async_write(int fd, std::string& must_be_written);
 
     void loop();
+    void delete_event(int fd);
 
 private:
 
@@ -119,6 +120,8 @@ private:
     int _epoll_fh;
     bool _stop;
     int _max_events_number;
+
+    std::unordered_map<int, EventTask*> events_tasks;
 };
 
 }

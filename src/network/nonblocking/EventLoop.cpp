@@ -2,23 +2,24 @@
 #include <logger/Logger.h>
 #include <netinet/in.h>
 #include <unistd.h>
+#include <algorithm>
 
 namespace Afina {
 namespace Network {
 namespace NonBlocking {
 
-void EventTask::process(uint32_t flags) {
+bool EventTask::process(uint32_t flags) {
     Logger& logger = Logger::Instance();
 
     if (flags & EPOLLIN) {
-        if (_is_server) {
+        if (not reader) { // Если нет reader'a, то пришло событие на server socket
 
             struct sockaddr_in client_addr;
             socklen_t sinSize = sizeof(struct sockaddr_in);
 
             // Создаем новое подключение
             int client_fh;
-            check_and_assign_sys_call(client_fh, accept(_read_fh, (struct sockaddr *) &client_addr, &sinSize));
+            check_and_assign_sys_call(client_fh, accept(fd, (struct sockaddr *) &client_addr, &sinSize));
 
             logger.write("Get new client =", client_fh);
 
@@ -33,16 +34,18 @@ void EventTask::process(uint32_t flags) {
             ssize_t has_read = 0;
             char buffer[BUFFER_SIZE];
 
-            while ((has_read = read(_read_fh, buffer, BUFFER_SIZE)) > 0) {
-                logger.write("Has read", has_read, "bytes from socket:", _read_fh);
+            while ((has_read = read(fd, buffer, BUFFER_SIZE)) > 0) {
+                logger.write("Has read", has_read, "bytes from socket:", fd);
 
                 read_buffer.Put(buffer);
 
-                bool should_continue = reader(read_buffer, *this);
+                // Вызываем callback, который нам передали, он
+                // возвращает нам "должны ли мы продолжать работу с данным клиентом"
+                bool should_continue = reader(fd, read_buffer);
 
                 if (not should_continue) {
-                    logger.write("End working with:", _read_fh);
-                    //TODO should delete this socket from epoll
+                    logger.write("End working with:", fd);
+                    return false; // Delete event from epoll
                 }
             }
 
@@ -51,43 +54,110 @@ void EventTask::process(uint32_t flags) {
                     logger.write("Socket is overloaded, wait...");
                 } else {
                     logger.write("Error during read(), errno =", errno);
-                    //TODO should delete this socket from epoll
+                    return false; // Delete event from epoll
                 }
             } else {
                 logger.write("Client close connection, goodbye");
-                //TODO should delete this socket from epoll
+                return false; // Delete event from epoll
             }
         }
     }
+
+    if (flags & EPOLLOUT) {
+        while (not write_queue_messages.empty()) {
+            SmartString& cur_message = write_queue_messages.front();
+            ssize_t has_write;
+            size_t need_write = std::min(size_t(BUFFER_SIZE), cur_message.size());
+            while ((has_write = write(fd, cur_message.data(), need_write)) > 0) {
+                logger.write("Has write", has_write, "bytes to", fd);
+
+                cur_message.Erase(has_write);
+                need_write = std::min(size_t(BUFFER_SIZE), cur_message.size());
+
+                if (need_write == 0)
+                    break;
+            }
+
+            if (cur_message.empty()) {
+                write_queue_messages.pop();
+            } else {
+                if (has_write < 0) {
+                    if (errno == EAGAIN) {
+                        logger.write("Socket(", fd, " is overloaded now, wait...");
+                        break;
+                    } else {
+                        logger.write("Error during write(), errno =", errno);
+                        return false; // Delete event from epoll
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (write_queue_messages.empty()) { // Если сообщений больше нет, надо опустить флаг EPOLLOUT
+            epoll_event ev{};
+            ev.events = EPOLLIN | EPOLLHUP;
+
+            check_sys_call(epoll_ctl(epoll_fh, EPOLL_CTL_MOD, fd, &ev));
+        }
+    }
+
+    if (flags & EPOLLHUP) {
+        return false; // Delete event from epoll
+    }
 }
 
-void EventLoop::async_accept(int server_socket, std::function<bool(int)>&& func) {
+void EventLoop::async_accept(int server_socket, std::function<bool(int)> func) {
     epoll_event ev{};
-    ev.data.fd = server_socket;
     ev.events = EPOLLIN | EPOLLHUP;
 
-    auto task = new EventTask(server_socket, true);
+    auto task = new EventTask(server_socket);
     task->add_acceptor(std::move(func));
     ev.data.ptr = task;
 
     check_sys_call(epoll_ctl(_epoll_fh, EPOLL_CTL_ADD, server_socket, &ev));
 }
 
-void EventLoop::async_read(int read_fh, std::function<bool(SmartString&, EventTask&)>&& func) {
+void EventLoop::async_read(int fd, std::function<bool(int, SmartString&)> func) {
     epoll_event ev{};
-    ev.data.fd = read_fh;
     ev.events = EPOLLIN | EPOLLHUP;
 
-    auto task = new EventTask(read_fh);
+    auto task = new EventTask(fd);
     task->add_reader(std::move(func));
     ev.data.ptr = task;
 
-    check_sys_call(epoll_ctl(_epoll_fh, EPOLL_CTL_ADD, read_fh, &ev));
+    events_tasks[fd] = task;
+    check_sys_call(epoll_ctl(_epoll_fh, EPOLL_CTL_ADD, fd, &ev));
 }
 
 
-void EventLoop::async_write(std::string &must_be_written, EventTask *event_task) {
+void EventLoop::async_write(int fd, std::string& must_be_written) {
+    epoll_event ev{};
+    auto it = events_tasks.find(fd);
 
+    if (it == events_tasks.end()) {
+        auto event_task = it->second;
+        // Если в epoll уже лежит такой filehandler, в таком случае мы должны просто добавить
+        // новое сообщение в таск этого filehandler'a
+
+        if (event_task->message_queue_empty()) { // Если сообщений еще нет, надо добавить флаг EPOLLOUT
+            ev.events |= EPOLLOUT;
+            check_sys_call(epoll_ctl(_epoll_fh, EPOLL_CTL_MOD, fd, &ev));
+        }
+
+        event_task->add_message_to_write(must_be_written); // Добавляем в очередь новое сообщение
+
+    } else {
+        // Иначе добавляем новое событие в epoll
+        epoll_event ev{};
+        ev.events = EPOLLOUT;
+        auto task = new EventTask(fd);
+        task->add_message_to_write(must_be_written);
+        ev.data.ptr = task;
+
+        events_tasks[fd] = task;
+        check_sys_call(epoll_ctl(_epoll_fh, EPOLL_CTL_ADD, fd, &ev));
+    }
 }
 
 void EventLoop::loop() {
@@ -97,25 +167,39 @@ void EventLoop::loop() {
         int events_count = epoll_wait(_epoll_fh, _events, _max_events_number, -1); // -1 - Timeout
 
         for (int i = 0; i < events_count; i++) {
-            int events = _events[i].events;
-
             auto task = static_cast<EventTask*>(_events[i].data.ptr);
+            bool should_delete = false, was_error = false;
             try {
-                task->process(_events[i].events);
+                should_delete = task->process(_events[i].events);
             } catch (std::runtime_error& error) {
                 logger.write("Can not execute task, desc:", error.what());
+                was_error = true;
+            }
+
+            if (should_delete || was_error) {
+                int fd = task->fd;
+                delete task;
+                delete_event(task->fd);
             }
         }
     }
 }
 
+int EventTask::epoll_fh;
 bool EventLoop::Start(int events_max_number) {
     _max_events_number = events_max_number;
     _events = new epoll_event[events_max_number];
 
     check_and_assign_sys_call(_epoll_fh, epoll_create(events_max_number));
+
+    EventTask::epoll_fh = _epoll_fh;
 }
 
+void EventLoop::delete_event(int fd) {
+    epoll_event ev{};
+
+    check_sys_call(epoll_ctl(_epoll_fh, EPOLL_CTL_DEL, fd, &ev));
+}
 
 }
 }

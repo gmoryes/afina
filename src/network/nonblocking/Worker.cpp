@@ -1,20 +1,5 @@
 #include "Worker.h"
 
-#include <iostream>
-
-#include <sys/epoll.h>
-#include <sys/socket.h>
-#include <sys/types.h>
-#include <netinet/in.h>
-
-#include "Utils.h"
-
-#include <string>
-#include <sstream>
-#include <utility>
-#include <logger/Logger.h>
-#include "EventLoop.h"
-
 #define EPOLL_SIZE 10000
 
 namespace Afina {
@@ -33,17 +18,10 @@ Worker::~Worker() {
     stop = false;
 }
 
-bool writer(Worker &worker, EventTask& event_task, int has_written) {
-    Logger& logger = Logger::Instance();
-
-    logger.write("Wrote", has_written, "bytes in socket:", event_task.write_fh());
-    return true;
-}
-
 bool reader(Worker& worker,
             std::shared_ptr<Protocol::Parser>& parser,
-            SmartString& buffer,
-            EventTask& event_task) {
+            int fd,
+            SmartString& buffer) {
 
     Logger& logger = Logger::Instance();
 
@@ -80,30 +58,36 @@ bool reader(Worker& worker,
         std::string must_be_written;
         command->Execute(*(worker.storage), buffer.Copy(body_size), must_be_written);
 
-        //worker.event_loop.async_write(
-        worker.event_loop.async_write(must_be_written, &event_task);
-
+        // Передаем event_loop строку для записи
+        if (fd == worker.fifo.first) {// В случае fifo пишем в fd для записи
+            //worker.event_loop.async_write(worker.fifo.second, must_be_written);
+        } else {// В случае обычного клиента, пишем ему
+            //worker.event_loop.async_write(fd, must_be_written);
+        }
         return true;
     }
 }
 
 bool acceptor(Worker& worker, int client_fh) {
+    using namespace std::placeholders;
 
     Logger& logger = Logger::Instance();
     logger.write("Accept new client:", client_fh);
 
-    using namespace std::placeholders;
-
     auto new_parser = std::make_shared<Protocol::Parser>();
     worker.parsers.push_back(new_parser);
 
-    auto bind_reader = std::bind(reader, new_parser, _1);
-    worker.event_loop.async_read(client_fh, bind_reader);
+    //auto bind_reader = std::bind(reader, worker, new_parser, _1, _2);
+    //worker.event_loop.async_read(client_fh, std::move(bind_reader));
 
     return true;
 }
 
-void Worker::OnRun(int server_socket, int r_fifo, int worker_number) {
+void test(Worker& self, int a, int b) {
+    std::cout << a << ' ' << b << std::endl;
+}
+
+void Worker::OnRun(int server_socket, int worker_number, int r_fifo = -1) {
     using namespace std::placeholders;
 
     Logger &logger = Logger::Instance();
@@ -118,86 +102,18 @@ void Worker::OnRun(int server_socket, int r_fifo, int worker_number) {
 
     SharedParsers parsers;
 
-    auto bind_acceptor = std::bind(acceptor, *this, _1);
-    event_loop.async_accept(server_socket, bind_acceptor);
+    if (r_fifo != -1) { // Add fifo listener
+        auto new_parser = std::make_shared<Protocol::Parser>();
+        parsers.push_back(new_parser);
+
+        //auto bind_reader = std::bind(reader, *this, new_parser, _1, _2);
+        //event_loop.async_read(r_fifo, std::move(bind_reader));
+    }
+
+    //auto bind_acceptor = std::bind(acceptor, *this, _1);
+    auto f = std::bind(test, *this, 100, _1);
+    //event_loop.async_accept(server_socket, std::move(bind_acceptor));
     event_loop.loop();
-}
-
-// See Worker.h
-void Worker::OnRunOld(int server_socket, int r_fifo, int worker_number) {
-    Logger& logger = Logger::Instance();
-
-    std::stringstream ss;
-    ss << "WORKER_" << worker_number;
-    logger.i_am(ss.str());
-
-    logger.write("Hello");
-
-    struct epoll_event ev, events[EPOLL_SIZE];
-
-    int epoll_fd;
-    epoll_fd = epoll_create(EPOLL_SIZE);
-    if (epoll_fd < 0) {
-        logger.write("epoll_create() -1, errno =", errno);
-        return;
-    }
-
-    // Add server socket
-    ev.data.fd = server_socket;
-    ev.events = EPOLLIN;
-    if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, server_socket, &ev) < 0) {
-        logger.write("epoll_ctl() return -1, errno =", errno);
-        return;
-    }
-
-    // Add fifo if need
-    if (fifo.first != -1) {
-        ev.data.fd = fifo.first;
-        ev.events = EPOLLIN | EPOLLEXCLUSIVE;
-        if (epoll_ctl(epoll_fd, EPOLL_CTL_ADD, fifo.first, &ev) < 0) {
-            logger.write("epoll_ctl() return -1, errno =", errno);
-            return;
-        }
-    }
-
-    int events_count;
-    struct sockaddr_in client_addr;
-    socklen_t sinSize = sizeof(struct sockaddr_in);
-
-    while(not stop) {
-        events_count = epoll_wait(epoll_fd, events, EPOLL_SIZE, -1); // Timeout -1
-
-        for (int i = 0; i < events_count; i++) {
-            int socket_fh = events[i].data.fd;
-            if (socket_fh == server_socket) {
-                int client = accept(server_socket, (struct sockaddr *) &client_addr, &sinSize);
-                if (client < 0) {
-                    logger.write("accept() return -1, errno:", errno);
-                    continue;
-                }
-
-                logger.write("Get new client =", client);
-                make_socket_non_blocking(client);
-                ev.data.fd = client;
-                ev.events = EPOLLIN | EPOLLHUP;
-
-                epoll_ctl(epoll_fd, EPOLL_CTL_ADD, client, &ev);
-
-                tasks.emplace(client, std::move(Task(client)));
-            } else {
-                auto& task = tasks[socket_fh];
-                task.process(storage, events[i].events);
-                if (task.can_be_deleted()) {
-                    epoll_ctl(epoll_fd, EPOLL_CTL_DEL, socket_fh, &ev);
-                    tasks.erase(socket_fh);
-                } else if (task.epoll_flags()) {
-                    uint32_t flags = task.epoll_flags(0);
-                    ev.events = flags;
-                    epoll_ctl(epoll_fd, EPOLL_CTL_MOD, socket_fh, &ev);
-                }
-            }
-        }
-    }
 }
 
 // See Worker.h

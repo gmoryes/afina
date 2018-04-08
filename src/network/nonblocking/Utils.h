@@ -26,21 +26,40 @@ void make_socket_non_blocking(int sfd);
 class SmartString {
 public:
     // Конструктор по умолчанию
-    SmartString(): _string(nullptr), _free_size(0), _start_pos(0), _end_pos(0) {};
+    SmartString(): _string(nullptr), _size(0), _free_size(0), _start_pos(0), _end_pos(0) {};
 
     // Конструктор от char*
-    SmartString(const char* buffer);
+    explicit SmartString(const char* buffer);
+
+    // Конструктор от std::string, вызываем конструктор от char*
+    explicit SmartString(std::string& data): SmartString(data.c_str()) {};
+
+    //TODO add operator= from rvalue
+    // Move constructor
+    SmartString(SmartString&& from);
+
+    ~SmartString() {
+        if (_string)
+            delete[] _string;
+    }
 
     // Нам нужна операция += (быстрая)
     void Put(const char* put_string);
 
-    // Нам по факту надо освобождать только первые n байт
-    // Функция сдвигает указатель на начало строки на n
-    // Она ничего не освобождает итд итп
+    /**
+     * Нам по факту надо освобождать только первые n байт
+     * Функция сдвигает указатель на начало строки на n
+     * Она ничего не освобождает итд итп
+     * @param n_bytes - сколько байт надо удалить сначала
+     */
     void Erase(size_t n_bytes);
 
     // Возвращает первые n байт строки
     std::string Copy(size_t n_bytes);
+
+    char* data() {
+        return _string + _start_pos;
+    }
 
     char& operator[] (size_t i) const {
         if (i >= _size)
@@ -60,9 +79,8 @@ public:
         return _size - _free_size;
     }
 
-    ~SmartString() {
-        if (_string)
-            delete[] _string;
+    bool empty() const {
+        return _size == 0;
     }
 private:
 
