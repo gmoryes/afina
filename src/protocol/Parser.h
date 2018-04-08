@@ -46,7 +46,7 @@ public:
      * method return nullptr
      */
     using Command = std::unique_ptr<Afina::Execute::Command>;
-    Command Build(uint32_t &body_size) const;
+    Command Build() const;
     /**
      * Reset parse so that it could be used to parse out new command
      */

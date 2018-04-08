@@ -18,13 +18,12 @@ Worker::~Worker() {
     stop = false;
 }
 
-bool reader(Worker& worker,
-            std::shared_ptr<Protocol::Parser>& parser,
+bool reader(const std::shared_ptr<Worker>& worker,
+            const std::shared_ptr<Protocol::Parser>& parser,
             int fd,
             SmartString& buffer) {
 
     Logger& logger = Logger::Instance();
-
     size_t cur_parsed;
     bool find_command;
     try {
@@ -46,7 +45,7 @@ bool reader(Worker& worker,
 
         Protocol::Parser::Command command;
         try {
-            command = parser->Build(body_size);
+            command = parser->Build();
         } catch (std::runtime_error& error) {
             logger.write("Error during Build(), desc:", error.what());
             return false;
@@ -56,35 +55,36 @@ bool reader(Worker& worker,
         parser->Reset(); // Delete data, that we has parsed
 
         std::string must_be_written;
-        command->Execute(*(worker.storage), buffer.Copy(body_size), must_be_written);
+        command->Execute(*(worker->storage), buffer.Copy(body_size), must_be_written);
 
         // Передаем event_loop строку для записи
-        if (fd == worker.fifo.first) {// В случае fifo пишем в fd для записи
-            //worker.event_loop.async_write(worker.fifo.second, must_be_written);
-        } else {// В случае обычного клиента, пишем ему
-            //worker.event_loop.async_write(fd, must_be_written);
+        if (fd == worker->fifo.first) {
+            if (worker->fifo.second != -1)
+                worker->event_loop.async_write(worker->fifo.second, must_be_written); // Fifo case
+        } else {
+            worker->event_loop.async_write(fd, must_be_written); // Client case
         }
+
         return true;
     }
 }
 
-bool acceptor(Worker& worker, int client_fh) {
+bool acceptor(const std::shared_ptr<Worker>& worker, int client_fh) {
     using namespace std::placeholders;
 
     Logger& logger = Logger::Instance();
     logger.write("Accept new client:", client_fh);
 
-    auto new_parser = std::make_shared<Protocol::Parser>();
-    worker.parsers.push_back(new_parser);
+    auto new_parser = std::make_shared<Protocol::Parser>(Protocol::Parser());
 
-    //auto bind_reader = std::bind(reader, worker, new_parser, _1, _2);
-    //worker.event_loop.async_read(client_fh, std::move(bind_reader));
+    auto bind_reader = std::bind(reader, worker, new_parser, _1, _2);
+    worker->event_loop.async_read(client_fh, std::move(bind_reader));
 
     return true;
 }
 
-void test(Worker& self, int a, int b) {
-    std::cout << a << ' ' << b << std::endl;
+void test(std::shared_ptr<Worker> worker, int a, int b) {
+
 }
 
 void Worker::OnRun(int server_socket, int worker_number, int r_fifo = -1) {
@@ -104,15 +104,13 @@ void Worker::OnRun(int server_socket, int worker_number, int r_fifo = -1) {
 
     if (r_fifo != -1) { // Add fifo listener
         auto new_parser = std::make_shared<Protocol::Parser>();
-        parsers.push_back(new_parser);
 
-        //auto bind_reader = std::bind(reader, *this, new_parser, _1, _2);
-        //event_loop.async_read(r_fifo, std::move(bind_reader));
+        auto bind_reader = std::bind(reader, shared_from_this(), new_parser, _1, _2);
+        event_loop.async_read(r_fifo, std::move(bind_reader), EPOLLIN | EPOLLEXCLUSIVE | EPOLLHUP);
     }
 
-    //auto bind_acceptor = std::bind(acceptor, *this, _1);
-    auto f = std::bind(test, *this, 100, _1);
-    //event_loop.async_accept(server_socket, std::move(bind_acceptor));
+    auto bind_acceptor = std::bind(acceptor, shared_from_this(), _1);
+    event_loop.async_accept(server_socket, std::move(bind_acceptor));
     event_loop.loop();
 }
 
@@ -121,7 +119,7 @@ void Worker::Start(int server_socket, int worker_number) {
     Logger& logger = Logger::Instance();
 
     try {
-        std::thread thread(&Worker::OnRun, this, server_socket, fifo.first, worker_number);
+        std::thread thread(&Worker::OnRun, this, server_socket, worker_number, fifo.first);
         thread.detach();
     } catch (std::runtime_error& error) {
         logger.write(

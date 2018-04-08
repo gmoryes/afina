@@ -38,59 +38,13 @@ ServerImpl::ServerImpl(std::shared_ptr<Afina::Storage> ps):
 // See Server.h
 ServerImpl::~ServerImpl() {}
 
-bool delete_if_need(const std::string& name, bool force) {
-    Logger& logger = Logger::Instance();
-
-    if (name == "/dev/null")
-        return true;
-
-    if (is_file_exists(name)) {
-        logger.write("File:", name, "already exists");
-        logger.write("Going to unlink it");
-        if (unlink(name.c_str()) < 0) {
-            logger.write("unlink() -1, errno =", errno);
-            return false;
-        } else {
-            return true;
-        }
-    }
-}
-
 bool ServerImpl::StartFIFO(const std::string& r_fifo_name,
                            const std::string& w_fifo_name,
                            bool force) {
 
-    Logger& logger = Logger::Instance();
-
-    delete_if_need(r_fifo_name, force);
-    delete_if_need(w_fifo_name, force);
-
-    if (mkfifo(r_fifo_name.c_str(), 0666) < 0) {
-        logger.write("mkfifo()1 -1, errno =", errno);
-        return false;
-    }
-
-    if (mkfifo(w_fifo_name.c_str(), 0666) < 0) {
-        logger.write("mkfifo()2 -1, errno =", errno);
-        return false;
-    }
-
-    r_fifo = open(r_fifo_name.c_str(), O_RDWR);
-    if (r_fifo < 0) {
-        logger.write("Can not open file:", r_fifo_name,
-                     "for O_RDWR, errno =", errno);
-        return false;
-    }
-
-    w_fifo = open(w_fifo_name.c_str(), O_RDWR);
-    if (w_fifo < 0) {
-        logger.write("Can not open file:", w_fifo_name,
-                     "for O_RDWR, errno =", errno);
-        return false;
-    }
-
-    make_socket_non_blocking(r_fifo);
-    make_socket_non_blocking(w_fifo);
+    r_fifo = make_fifo_file(r_fifo_name);
+    if (w_fifo_name.size())
+        w_fifo = make_fifo_file(w_fifo_name);
 
     return true;
 }
@@ -110,9 +64,7 @@ void ServerImpl::Start(uint32_t port, uint16_t n_workers) {
     sigset_t sig_mask;
     sigemptyset(&sig_mask);
     sigaddset(&sig_mask, SIGPIPE);
-    if (pthread_sigmask(SIG_BLOCK, &sig_mask, NULL) != 0) {
-        throw std::runtime_error("Unable to mask SIGPIPE");
-    }
+    check_sys_call(pthread_sigmask(SIG_BLOCK, &sig_mask, NULL));
 
     // Create server socket
     struct sockaddr_in server_addr;
@@ -121,10 +73,8 @@ void ServerImpl::Start(uint32_t port, uint16_t n_workers) {
     server_addr.sin_port = htons(port);       // TCP port number
     server_addr.sin_addr.s_addr = INADDR_ANY; // Bind to any address
 
-    int server_socket = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if (server_socket == -1) {
-        throw std::runtime_error("Failed to open socket");
-    }
+    int server_socket;
+    check_and_assign_sys_call(server_socket, socket(PF_INET, SOCK_STREAM, IPPROTO_TCP));
 
     int opts = 1;
     if (setsockopt(server_socket, SOL_SOCKET, SO_REUSEPORT, &opts, sizeof(opts)) == -1) {
@@ -144,21 +94,19 @@ void ServerImpl::Start(uint32_t port, uint16_t n_workers) {
     }
 
     std::pair<int, int> fifo = std::make_pair(r_fifo, w_fifo);
+    workers.reserve(n_workers);
     for (int i = 0; i < n_workers; i++) {
-        workers.emplace_back(pStorage, fifo);
+        auto new_worker = Worker::Create(pStorage, fifo);
+        workers.push_back(new_worker);
+        workers.back()->Start(server_socket, i);
     }
-
-    for (int i = 0; i < n_workers; i++) {
-        workers[i].Start(server_socket, i);
-    }
-
 }
 
 // See Server.h
 void ServerImpl::Stop() {
     std::cout << "network debug: " << __PRETTY_FUNCTION__ << std::endl;
     for (auto &worker : workers) {
-        worker.Stop();
+        worker->Stop();
     }
 }
 
@@ -166,7 +114,7 @@ void ServerImpl::Stop() {
 void ServerImpl::Join() {
     std::cout << "network debug: " << __PRETTY_FUNCTION__ << std::endl;
     for (auto &worker : workers) {
-        worker.Join();
+        worker->Join();
     }
 }
 

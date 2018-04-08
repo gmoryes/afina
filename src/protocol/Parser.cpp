@@ -13,7 +13,7 @@
 #include <afina/execute/Stats.h>
 
 #include <network/nonblocking/Utils.h>
-
+#include <logger/Logger.h>
 namespace Afina {
 
 using namespace Utils;
@@ -169,12 +169,11 @@ bool Parser::Parse(SmartString& input, const size_t size, size_t &parsed) {
 }
 
 // See Parse.h
-Parser::Command Parser::Build(uint32_t &body_size) const {
+Parser::Command Parser::Build() const {
     if (state != State::sLF) {
         return Command(nullptr);
     }
 
-    body_size = bytes;
     if (name == "set") {
         return Command(new Execute::Set(keys[0], flags, exprtime));
     } else if (name == "add") {

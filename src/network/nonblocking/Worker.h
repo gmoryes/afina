@@ -27,7 +27,7 @@ using namespace Utils;
  * On Start spaws background thread that is doing epoll on the given server
  * socket and process incoming connections and its data
  */
-class Worker {
+class Worker : public std::enable_shared_from_this<Worker> {
 public:
     using storage_type = std::shared_ptr<Afina::Storage>;
     using SharedParsers = std::vector<std::shared_ptr<Protocol::Parser>>;
@@ -36,6 +36,11 @@ public:
     Worker(std::shared_ptr<Afina::Storage> ps, const std::pair<int, int>& fifo);
     Worker(Worker&&) = default;
     ~Worker();
+
+    static std::shared_ptr<Worker> Create(std::shared_ptr<Afina::Storage> ps, const std::pair<int, int>& fifo) {
+        std::shared_ptr<Worker> p(new Worker(ps, fifo));
+        return p;
+    }
 
     /**
      * Spaws new background thread that is doing epoll on the given server
@@ -58,9 +63,11 @@ public:
      */
     void Join();
 
-    friend void test(Worker& self, int a, int b);
-    friend bool acceptor(Worker& worker, int client_fh);
-    friend bool reader(Worker& worker, std::shared_ptr<Protocol::Parser>& parser, int fd, SmartString& buffer);
+    friend bool acceptor(const std::shared_ptr<Worker>& worker, int client_fh);
+    friend bool reader(const std::shared_ptr<Worker>&  worker,
+                       const std::shared_ptr<Protocol::Parser>& parser,
+                       int fd,
+                       SmartString& buffer);
     //friend bool writer(Worker& worker, EventTask& event_task, int has_written);
 
     bool stop;

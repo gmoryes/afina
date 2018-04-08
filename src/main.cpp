@@ -143,7 +143,7 @@ int main(int argc, char **argv) {
         r_fifo = options["r-fifo"].as<std::string>();
     }
 
-    std::string w_fifo = "/dev/null";
+    std::string w_fifo;
     if (options.count("w-fifo") > 0) {
         if (!r_fifo.size()) {
             std::cerr << "--r-fifo must be initialized, see -h for help" << std::endl;

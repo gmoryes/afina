@@ -12,20 +12,6 @@
 
 #include "Utils.h"
 
-#define check_sys_call(call) \
-    if ((call) < 0) { \
-        std::stringstream s; \
-        s << "call return -1" << " errno = ", errno; \
-        throw std::runtime_error(s.str()); \
-    }
-
-#define check_and_assign_sys_call(res, call) \
-    if (((res) = (call)) < 0) { \
-        std::stringstream s; \
-        s << "call return res" << " errno = ", errno; \
-        throw std::runtime_error(s.str()); \
-    }
-
 namespace Afina {
 using namespace Utils;
 
@@ -43,7 +29,7 @@ public:
     /**
      * Вызывается после, того, как epoll_wait вернул наше событие
      * @param flags - Флаг от epoll
-     * @return - true, если событие надо оставить в epoll, false - иначе
+     * @return - true, если событие надо удалить из epoll, false - иначе
      */
     bool process(uint32_t flags);
 
@@ -106,7 +92,7 @@ public:
      *               раз при считывании, в нее передается fd с которого произошло чтение
      *               и SmartString& - то, что смогли считать
      */
-    void async_read(int fd, std::function<bool(int, SmartString&)> func);
+    void async_read(int fd, std::function<bool(int, SmartString&)> func, uint32_t flags = 0);
 
     void async_write(int fd, std::string& must_be_written);
 

@@ -39,7 +39,7 @@ private:
     uint32_t listen_port;
 
     // Thread that is accepting new connections
-    std::vector<Worker> workers;
+    std::vector<std::shared_ptr<Worker>> workers;
 
     // File handlers for fifo files
     int r_fifo, w_fifo;

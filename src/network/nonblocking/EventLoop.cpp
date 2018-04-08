@@ -37,7 +37,7 @@ bool EventTask::process(uint32_t flags) {
             while ((has_read = read(fd, buffer, BUFFER_SIZE)) > 0) {
                 logger.write("Has read", has_read, "bytes from socket:", fd);
 
-                read_buffer.Put(buffer);
+                read_buffer.Put(buffer, has_read);
 
                 // Вызываем callback, который нам передали, он
                 // возвращает нам "должны ли мы продолжать работу с данным клиентом"
@@ -45,20 +45,20 @@ bool EventTask::process(uint32_t flags) {
 
                 if (not should_continue) {
                     logger.write("End working with:", fd);
-                    return false; // Delete event from epoll
+                    return true; // Delete event from epoll
                 }
             }
 
             if (has_read < 0) {
                 if (errno == EAGAIN) {
-                    logger.write("Socket is overloaded, wait...");
+                    logger.write("No data for read, socket(", fd, ") is still open, wait...");
                 } else {
                     logger.write("Error during read(), errno =", errno);
-                    return false; // Delete event from epoll
+                    return true; // Delete event from epoll
                 }
             } else {
                 logger.write("Client close connection, goodbye");
-                return false; // Delete event from epoll
+                return true; // Delete event from epoll
             }
         }
     }
@@ -87,8 +87,7 @@ bool EventTask::process(uint32_t flags) {
                         break;
                     } else {
                         logger.write("Error during write(), errno =", errno);
-                        return false; // Delete event from epoll
-                        break;
+                        return true; // Delete event from epoll
                     }
                 }
             }
@@ -96,15 +95,17 @@ bool EventTask::process(uint32_t flags) {
 
         if (write_queue_messages.empty()) { // Если сообщений больше нет, надо опустить флаг EPOLLOUT
             epoll_event ev{};
-            ev.events = EPOLLIN | EPOLLHUP;
-
+            ev.events &= ~EPOLLOUT;
+            ev.data.ptr = this;
             check_sys_call(epoll_ctl(epoll_fh, EPOLL_CTL_MOD, fd, &ev));
         }
     }
 
     if (flags & EPOLLHUP) {
-        return false; // Delete event from epoll
+        return true; // Delete event from epoll
     }
+
+    return false;
 }
 
 void EventLoop::async_accept(int server_socket, std::function<bool(int)> func) {
@@ -118,9 +119,12 @@ void EventLoop::async_accept(int server_socket, std::function<bool(int)> func) {
     check_sys_call(epoll_ctl(_epoll_fh, EPOLL_CTL_ADD, server_socket, &ev));
 }
 
-void EventLoop::async_read(int fd, std::function<bool(int, SmartString&)> func) {
+void EventLoop::async_read(int fd, std::function<bool(int, SmartString&)> func, uint32_t flags) {
     epoll_event ev{};
-    ev.events = EPOLLIN | EPOLLHUP;
+    if (!flags)
+        ev.events = EPOLLIN | EPOLLHUP;
+    else
+        ev.events = flags;
 
     auto task = new EventTask(fd);
     task->add_reader(std::move(func));
@@ -135,13 +139,14 @@ void EventLoop::async_write(int fd, std::string& must_be_written) {
     epoll_event ev{};
     auto it = events_tasks.find(fd);
 
-    if (it == events_tasks.end()) {
+    if (it != events_tasks.end()) {
         auto event_task = it->second;
         // Если в epoll уже лежит такой filehandler, в таком случае мы должны просто добавить
         // новое сообщение в таск этого filehandler'a
 
         if (event_task->message_queue_empty()) { // Если сообщений еще нет, надо добавить флаг EPOLLOUT
             ev.events |= EPOLLOUT;
+            ev.data.ptr = event_task;
             check_sys_call(epoll_ctl(_epoll_fh, EPOLL_CTL_MOD, fd, &ev));
         }
 
@@ -177,9 +182,8 @@ void EventLoop::loop() {
             }
 
             if (should_delete || was_error) {
-                int fd = task->fd;
-                delete task;
                 delete_event(task->fd);
+                delete task;
             }
         }
     }
