@@ -22,6 +22,8 @@
 #include "Utils.h"
 #include "Worker.h"
 
+#define EPOLL_SIZE 10000
+
 namespace Afina {
 
 using namespace Utils;
@@ -43,7 +45,7 @@ bool ServerImpl::StartFIFO(const std::string& r_fifo_name,
                            bool force) {
 
     r_fifo = make_fifo_file(r_fifo_name);
-    if (w_fifo_name.size())
+    if (not w_fifo_name.empty())
         w_fifo = make_fifo_file(w_fifo_name);
 
     return true;
@@ -93,10 +95,13 @@ void ServerImpl::Start(uint32_t port, uint16_t n_workers) {
         throw std::runtime_error("Socket listen() failed");
     }
 
+    event_loop = std::make_shared<EventLoop>();
+    event_loop->Start(EPOLL_SIZE);
     std::pair<int, int> fifo = std::make_pair(r_fifo, w_fifo);
+
     workers.reserve(n_workers);
     for (int i = 0; i < n_workers; i++) {
-        auto new_worker = Worker::Create(pStorage, fifo);
+        auto new_worker = Worker::Create(pStorage, event_loop, fifo);
         workers.push_back(new_worker);
         workers.back()->Start(server_socket, i);
     }

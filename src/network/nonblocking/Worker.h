@@ -33,12 +33,17 @@ public:
     using SharedParsers = std::vector<std::shared_ptr<Protocol::Parser>>;
 
     //Worker(): storage(-1ll) {}
-    Worker(std::shared_ptr<Afina::Storage> ps, const std::pair<int, int>& fifo);
+    Worker(std::shared_ptr<Afina::Storage> ps,
+           std::shared_ptr<EventLoop> event_loop,
+           std::pair<int, int>& fifo);
     Worker(Worker&&) = default;
     ~Worker();
 
-    static std::shared_ptr<Worker> Create(std::shared_ptr<Afina::Storage> ps, const std::pair<int, int>& fifo) {
-        std::shared_ptr<Worker> p(new Worker(ps, fifo));
+    static std::shared_ptr<Worker> Create(const std::shared_ptr<Afina::Storage>& ps,
+                                          const std::shared_ptr<EventLoop>& event_loop,
+                                          std::pair<int, int>& fifo) {
+
+        std::shared_ptr<Worker> p(new Worker(ps, event_loop, fifo));
         return p;
     }
 
@@ -64,6 +69,7 @@ public:
     void Join();
 
     friend bool acceptor(const std::shared_ptr<Worker>& worker, int client_fh);
+
     friend bool reader(const std::shared_ptr<Worker>&  worker,
                        const std::shared_ptr<Protocol::Parser>& parser,
                        int fd,
@@ -79,8 +85,7 @@ protected:
     void OnRun(int server_socket, int worker_number, int r_fifo);
 
 private:
-    EventLoop event_loop;
-    SharedParsers parsers;
+    std::shared_ptr<EventLoop> event_loop;
 
     std::shared_ptr<Afina::Storage> storage;
 

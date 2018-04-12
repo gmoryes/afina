@@ -4,6 +4,7 @@
 #include <vector>
 
 #include <afina/network/Server.h>
+#include "EventLoop.h"
 
 namespace Afina {
 namespace Network {
@@ -43,6 +44,9 @@ private:
 
     // File handlers for fifo files
     int r_fifo, w_fifo;
+
+    // EventLoop
+    std::shared_ptr<EventLoop> event_loop;
 };
 
 } // namespace NonBlocking

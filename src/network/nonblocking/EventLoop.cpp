@@ -9,7 +9,9 @@ namespace Network {
 namespace NonBlocking {
 
 bool EventTask::process(uint32_t flags) {
+    std::lock_guard<std::mutex> lock(mutex);
     Logger& logger = Logger::Instance();
+    epoll_event ev{};
 
     if (flags & EPOLLIN) {
         if (not reader) { // Если нет reader'a, то пришло событие на server socket
@@ -94,10 +96,12 @@ bool EventTask::process(uint32_t flags) {
         }
 
         if (write_queue_messages.empty()) { // Если сообщений больше нет, надо опустить флаг EPOLLOUT
-            epoll_event ev{};
-            ev.events &= ~EPOLLOUT;
+            event_flags &= ~EPOLLOUT;
+
+            ev.events = event_flags;
             ev.data.ptr = this;
-            check_sys_call(epoll_ctl(epoll_fh, EPOLL_CTL_MOD, fd, &ev));
+
+            check_sys_call(epoll_ctl(_epoll_fh, EPOLL_CTL_MOD, fd, &ev));
         }
     }
 
@@ -105,14 +109,23 @@ bool EventTask::process(uint32_t flags) {
         return true; // Delete event from epoll
     }
 
+    if (event_flags & EPOLLONESHOT) { // If event was EPOLLONESHOT, must re-arm fd
+        ev.events = event_flags;
+        ev.data.ptr = this;
+        check_sys_call(epoll_ctl(_epoll_fh, EPOLL_CTL_MOD, fd, &ev));
+    }
+
     return false;
 }
 
-void EventLoop::async_accept(int server_socket, std::function<bool(int)> func) {
+void EventLoop::async_accept(int server_socket, std::function<bool(int)> func, uint32_t flags) {
     epoll_event ev{};
-    ev.events = EPOLLIN | EPOLLHUP;
 
-    auto task = new EventTask(server_socket);
+    if (not flags)
+        flags = EPOLLIN | EPOLLHUP | EPOLLEXCLUSIVE;
+    ev.events = flags;
+
+    auto task = new EventTask(server_socket, flags, _epoll_fh);
     task->add_acceptor(std::move(func));
     ev.data.ptr = task;
 
@@ -121,12 +134,12 @@ void EventLoop::async_accept(int server_socket, std::function<bool(int)> func) {
 
 void EventLoop::async_read(int fd, std::function<bool(int, SmartString&)> func, uint32_t flags) {
     epoll_event ev{};
-    if (!flags)
-        ev.events = EPOLLIN | EPOLLHUP;
-    else
-        ev.events = flags;
+    if (not flags)
+        flags = EPOLLIN | EPOLLET | EPOLLONESHOT;
 
-    auto task = new EventTask(fd);
+    ev.events = flags;
+
+    auto task = new EventTask(fd, flags, _epoll_fh);
     task->add_reader(std::move(func));
     ev.data.ptr = task;
 
@@ -135,7 +148,7 @@ void EventLoop::async_read(int fd, std::function<bool(int, SmartString&)> func, 
 }
 
 
-void EventLoop::async_write(int fd, std::string& must_be_written) {
+void EventLoop::async_write(int fd, std::string& must_be_written, uint32_t flags) {
     epoll_event ev{};
     auto it = events_tasks.find(fd);
 
@@ -145,9 +158,15 @@ void EventLoop::async_write(int fd, std::string& must_be_written) {
         // новое сообщение в таск этого filehandler'a
 
         if (event_task->message_queue_empty()) { // Если сообщений еще нет, надо добавить флаг EPOLLOUT
-            ev.events |= EPOLLOUT;
+
+            if (not flags)
+                flags = EPOLLOUT;
+
+            event_task->event_flags |= flags;
+
+            ev.events = event_task->event_flags;
             ev.data.ptr = event_task;
-            check_sys_call(epoll_ctl(_epoll_fh, EPOLL_CTL_MOD, fd, &ev));
+            //check_sys_call(epoll_ctl(_epoll_fh, EPOLL_CTL_MOD, fd, &ev));
         }
 
         event_task->add_message_to_write(must_be_written); // Добавляем в очередь новое сообщение
@@ -155,8 +174,11 @@ void EventLoop::async_write(int fd, std::string& must_be_written) {
     } else {
         // Иначе добавляем новое событие в epoll
         epoll_event ev{};
-        ev.events = EPOLLOUT;
-        auto task = new EventTask(fd);
+        if (not flags)
+            flags = EPOLLOUT | EPOLLET | EPOLLONESHOT;
+        ev.events = flags;
+
+        auto task = new EventTask(fd, flags, _epoll_fh);
         task->add_message_to_write(must_be_written);
         ev.data.ptr = task;
 
@@ -170,9 +192,10 @@ void EventLoop::loop() {
 
     while (not _stop) {
         int events_count = epoll_wait(_epoll_fh, _events, _max_events_number, -1); // -1 - Timeout
-
+        logger.write("Wake up, event recv(", events_count, ")");
         for (int i = 0; i < events_count; i++) {
             auto task = static_cast<EventTask*>(_events[i].data.ptr);
+            logger.write("Get task(", task->fd, ")");
             bool should_delete = false, was_error = false;
             try {
                 should_delete = task->process(_events[i].events);
@@ -182,21 +205,19 @@ void EventLoop::loop() {
             }
 
             if (should_delete || was_error) {
-                delete_event(task->fd);
+                logger.write("Delete from epoll:", task->fd);
+                //delete_event(task->fd);
                 delete task;
             }
         }
     }
 }
 
-int EventTask::epoll_fh;
 bool EventLoop::Start(int events_max_number) {
     _max_events_number = events_max_number;
     _events = new epoll_event[events_max_number];
 
     check_and_assign_sys_call(_epoll_fh, epoll_create(events_max_number));
-
-    EventTask::epoll_fh = _epoll_fh;
 }
 
 void EventLoop::delete_event(int fd) {
