@@ -80,7 +80,6 @@ protected:
 
 private:
     EventLoop event_loop;
-    SharedParsers parsers;
 
     std::shared_ptr<Afina::Storage> storage;
 

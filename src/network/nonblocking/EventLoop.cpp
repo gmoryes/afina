@@ -14,12 +14,16 @@ bool EventTask::process(uint32_t flags) {
     if (flags & EPOLLIN) {
         if (not reader) { // Если нет reader'a, то пришло событие на server socket
 
-            struct sockaddr_in client_addr;
+            struct sockaddr_in client_addr{};
             socklen_t sinSize = sizeof(struct sockaddr_in);
 
             // Создаем новое подключение
             int client_fh;
-            check_and_assign_sys_call(client_fh, accept(fd, (struct sockaddr *) &client_addr, &sinSize));
+            client_fh = accept(fd, (struct sockaddr *) &client_addr, &sinSize);
+            if (client_fh == -1 && errno == EAGAIN) {
+                logger.write("accept() -1, try again later");
+                return false;
+            }
 
             logger.write("Get new client =", client_fh);
 
@@ -95,9 +99,10 @@ bool EventTask::process(uint32_t flags) {
 
         if (write_queue_messages.empty()) { // Если сообщений больше нет, надо опустить флаг EPOLLOUT
             epoll_event ev{};
-            ev.events &= ~EPOLLOUT;
+            event_flags &= ~EPOLLOUT;
+            ev.events = event_flags;
             ev.data.ptr = this;
-            check_sys_call(epoll_ctl(epoll_fh, EPOLL_CTL_MOD, fd, &ev));
+            check_sys_call(epoll_ctl(_epoll_fh, EPOLL_CTL_MOD, fd, &ev));
         }
     }
 
@@ -112,7 +117,7 @@ void EventLoop::async_accept(int server_socket, std::function<bool(int)> func) {
     epoll_event ev{};
     ev.events = EPOLLIN | EPOLLHUP;
 
-    auto task = new EventTask(server_socket);
+    auto task = new EventTask(server_socket, ev.events, _epoll_fh);
     task->add_acceptor(std::move(func));
     ev.data.ptr = task;
 
@@ -126,7 +131,7 @@ void EventLoop::async_read(int fd, std::function<bool(int, SmartString&)> func, 
     else
         ev.events = flags;
 
-    auto task = new EventTask(fd);
+    auto task = new EventTask(fd, ev.events, _epoll_fh);
     task->add_reader(std::move(func));
     ev.data.ptr = task;
 
@@ -145,7 +150,8 @@ void EventLoop::async_write(int fd, std::string& must_be_written) {
         // новое сообщение в таск этого filehandler'a
 
         if (event_task->message_queue_empty()) { // Если сообщений еще нет, надо добавить флаг EPOLLOUT
-            ev.events |= EPOLLOUT;
+            event_task->event_flags |= EPOLLOUT;
+            ev.events = event_task->event_flags;
             ev.data.ptr = event_task;
             check_sys_call(epoll_ctl(_epoll_fh, EPOLL_CTL_MOD, fd, &ev));
         }
@@ -154,9 +160,8 @@ void EventLoop::async_write(int fd, std::string& must_be_written) {
 
     } else {
         // Иначе добавляем новое событие в epoll
-        epoll_event ev{};
         ev.events = EPOLLOUT;
-        auto task = new EventTask(fd);
+        auto task = new EventTask(fd, ev.events, _epoll_fh);
         task->add_message_to_write(must_be_written);
         ev.data.ptr = task;
 
@@ -189,14 +194,11 @@ void EventLoop::loop() {
     }
 }
 
-int EventTask::epoll_fh;
 bool EventLoop::Start(int events_max_number) {
     _max_events_number = events_max_number;
     _events = new epoll_event[events_max_number];
 
     check_and_assign_sys_call(_epoll_fh, epoll_create(events_max_number));
-
-    EventTask::epoll_fh = _epoll_fh;
 }
 
 void EventLoop::delete_event(int fd) {

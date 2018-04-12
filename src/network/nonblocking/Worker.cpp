@@ -26,47 +26,54 @@ bool reader(const std::shared_ptr<Worker>& worker,
     Logger& logger = Logger::Instance();
     size_t cur_parsed;
     bool find_command;
-    try {
-        find_command = parser->Parse(buffer, buffer.size(), cur_parsed);
-    } catch (std::runtime_error& error) {
-        logger.write("Error during parser.Parse(), desc:", error.what());
-        return false;
-    }
-
-    buffer.Erase(cur_parsed);
-
-    if (find_command) { // Get command
-
-        uint32_t body_size = parser->GetBodySize();
-        body_size = (body_size == 0) ? body_size : body_size + 2; // \r\n
-
-        if (buffer.size() < body_size)
-            return true; // Read not enough, try again
-
-        Protocol::Parser::Command command;
+    while (not buffer.empty()) {
         try {
-            command = parser->Build();
-        } catch (std::runtime_error& error) {
-            logger.write("Error during Build(), desc:", error.what());
+            find_command = parser->Parse(buffer, buffer.size(), cur_parsed);
+        } catch (std::runtime_error &error) {
+            logger.write("Error during parser.Parse(), desc:", error.what());
             return false;
         }
 
-        buffer.Erase(body_size); // Delete body from read buffer
-        parser->Reset(); // Delete data, that we has parsed
+        buffer.Erase(cur_parsed);
 
-        std::string must_be_written;
-        command->Execute(*(worker->storage), buffer.Copy(body_size), must_be_written);
+        if (find_command) { // Get command
 
-        // Передаем event_loop строку для записи
-        if (fd == worker->fifo.first) {
-            if (worker->fifo.second != -1)
-                worker->event_loop.async_write(worker->fifo.second, must_be_written); // Fifo case
+            uint32_t body_size = parser->GetBodySize();
+
+            if (buffer.size() < body_size)
+                return true; // Read not enough, try again
+
+            Protocol::Parser::Command command;
+            try {
+                command = parser->Build();
+            } catch (std::runtime_error &error) {
+                logger.write("Error during Build(), desc:", error.what());
+                return false;
+            }
+
+            std::string must_be_written;
+            command->Execute(*(worker->storage), buffer.Copy(body_size), must_be_written);
+            must_be_written += "\r\n";
+
+            body_size = (body_size == 0) ? body_size : body_size + 2; // \r\n
+            buffer.Erase(body_size); // Delete body from read buffer
+            parser->Reset(); // Delete data, that we has parsed
+
+            // Передаем в event_loop строку для записи
+            if (fd == worker->fifo.first) {
+                if (worker->fifo.second != -1)
+                    worker->event_loop.async_write(worker->fifo.second, must_be_written); // Fifo case
+            } else {
+                worker->event_loop.async_write(fd, must_be_written); // Client case
+            }
+
         } else {
-            worker->event_loop.async_write(fd, must_be_written); // Client case
+            return true;
         }
-
-        return true;
     }
+
+    return true;
+
 }
 
 bool acceptor(const std::shared_ptr<Worker>& worker, int client_fh) {
@@ -83,10 +90,6 @@ bool acceptor(const std::shared_ptr<Worker>& worker, int client_fh) {
     return true;
 }
 
-void test(std::shared_ptr<Worker> worker, int a, int b) {
-
-}
-
 void Worker::OnRun(int server_socket, int worker_number, int r_fifo = -1) {
     using namespace std::placeholders;
 
@@ -100,9 +103,7 @@ void Worker::OnRun(int server_socket, int worker_number, int r_fifo = -1) {
 
     event_loop.Start(EPOLL_SIZE);
 
-    SharedParsers parsers;
-
-    if (r_fifo != -1) { // Add fifo listener
+    if (worker_number == 0 && r_fifo != -1) { // Add fifo listener
         auto new_parser = std::make_shared<Protocol::Parser>();
 
         auto bind_reader = std::bind(reader, shared_from_this(), new_parser, _1, _2);

@@ -21,7 +21,12 @@ namespace NonBlocking {
 // То, что приписывается каждому filehandlr'у
 class EventTask {
 public:
-    explicit EventTask(int fd): read_buffer(), fd(fd) {}
+    EventTask(int fd, uint32_t flags, int epoll_fh):
+        read_buffer(),
+        fd(fd),
+        event_flags(flags),
+        _epoll_fh(epoll_fh) {}
+
     ~EventTask() {
         close(fd);
     }
@@ -51,8 +56,9 @@ public:
     }
 
     int fd;
-    static int epoll_fh; // Initialized in EventLoop::Start()
+    uint32_t event_flags;
 private:
+    int _epoll_fh;
     SmartString read_buffer;
     std::queue<SmartString> write_queue_messages;
 

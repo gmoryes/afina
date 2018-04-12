@@ -27,10 +27,12 @@ sub main {
 
     $data = $server->get($key);
     $server->close;
-    if ($data eq "VALUE $key 0 ".length($value)."\r\n$value\r\nEND\r\n") {
+    
+    my $must_be = "VALUE $key 0 ".length($value)."\r\n$value\r\nEND\r\n";
+    if ($data eq $must_be) {
         return 1;
     } else {
-        say "get not ok", quote_symbols($data);
+        say "Error\nGet: " . quote_symbols($data) . "\nExpected: " . quote_symbols($must_be);
         return 0;
     }
 
