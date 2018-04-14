@@ -179,7 +179,6 @@ private:
 
         // While ThredPool is run
         while (executor->state == Executor::State::kRun) {
-
             {
                 // Critical section for condvar
                 std::unique_lock<std::mutex> lock(executor->mutex);

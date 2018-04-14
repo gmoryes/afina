@@ -15,7 +15,7 @@
 #define check_sys_call(call) \
     if ((call) < 0) { \
         std::stringstream s; \
-        s << "call return -1" << " errno = " << errno \
+        s << #call << " return -1" << " errno = " << errno \
           << ", at line: " <<  __LINE__ << ", file: " << __FILE__; \
         throw std::runtime_error(s.str()); \
     }
@@ -23,7 +23,7 @@
 #define check_and_assign_sys_call(res, call) \
     if (((res) = (call)) < 0) { \
         std::stringstream s; \
-        s << "(call) return res" << " errno = " << errno \
+        s << #call << " return: " << res << " errno = " << errno \
           << ", at line: " <<  __LINE__ << ", file: " << __FILE__; \
         throw std::runtime_error(s.str()); \
     }

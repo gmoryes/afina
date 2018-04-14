@@ -3,15 +3,20 @@
 #include <netinet/in.h>
 #include <unistd.h>
 #include <algorithm>
+#include <chrono>
 
 namespace Afina {
 namespace Network {
 namespace NonBlocking {
 
-bool EventTask::process(uint32_t flags) {
+int EventLoop::StopWaitTime = 3000;
+int EventLoop::WaitAfterCloseEpoll = 1000;
+int EventLoop::LastWriteWaitTime = 1000;
+
+bool EventTask::process(uint32_t flags, State state) {
     Logger& logger = Logger::Instance();
 
-    if (flags & EPOLLIN) {
+    if (flags & EPOLLIN && state == State::Running) {
         if (not reader) { // Если нет reader'a, то пришло событие на server socket
 
             struct sockaddr_in client_addr{};
@@ -172,15 +177,25 @@ void EventLoop::async_write(int fd, std::string& must_be_written) {
 
 void EventLoop::loop() {
     Logger& logger = Logger::Instance();
+    state = State::Running;
 
     while (not _stop) {
+
         int events_count = epoll_wait(_epoll_fh, _events, _max_events_number, -1); // -1 - Timeout
+        if (events_count < 0) {
+            logger.write("epoll_wait() -1, errno(", errno, ")");
+            break;
+        }
+
+        if (_stop)
+            // task->process() will do only write operations
+            state = State::Stopping;
 
         for (int i = 0; i < events_count; i++) {
             auto task = static_cast<EventTask*>(_events[i].data.ptr);
             bool should_delete = false, was_error = false;
             try {
-                should_delete = task->process(_events[i].events);
+                should_delete = task->process(_events[i].events, state);
             } catch (std::runtime_error& error) {
                 logger.write("Can not execute task, desc:", error.what());
                 was_error = true;
@@ -192,6 +207,12 @@ void EventLoop::loop() {
             }
         }
     }
+    logger.write("Stopping");
+    state = State::Stopping;
+    EventLoop::clear_tasks_data();
+    state = State::Stopped;
+    logger.write("Send notify of done");
+    cv.notify_all();
 }
 
 bool EventLoop::Start(int events_max_number) {
@@ -199,14 +220,108 @@ bool EventLoop::Start(int events_max_number) {
     _events = new epoll_event[events_max_number];
 
     check_and_assign_sys_call(_epoll_fh, epoll_create(events_max_number));
+
+    interrupter.init(_epoll_fh);
+    epoll_event ev{};
+    ev.events = EPOLLET | EPOLLIN | EPOLLHUP;
+    check_sys_call(epoll_ctl(_epoll_fh, EPOLL_CTL_ADD, interrupter.fd, &ev));
 }
 
 void EventLoop::delete_event(int fd) {
     epoll_event ev{};
-
+    events_tasks.erase(fd);
     check_sys_call(epoll_ctl(_epoll_fh, EPOLL_CTL_DEL, fd, &ev));
 }
 
+void EventLoop::Stop() {
+    _stop.store(true);
+}
+
+void EventLoop::Join() {
+    Logger& logger = Logger::Instance();
+
+    if (state == State::Stopped)
+        return;
+
+    /**
+     * Вначале ждем 3 секунды, возможно EventLoop сам заметит, что надо
+     * остановиться. По прошествии 3-ех секунд, закрываем epoll fd
+     */
+    if (EventLoop::wait_for_stopping(EventLoop::StopWaitTime))
+        return;
+
+    logger.write("Send notify to epoll");
+    interrupter.interrupt();
+
+    /**
+     * Когда мы закрыли epoll fd, даем EventLoop еще 1 секунду, чтобы
+     * завершить корректно свою работу
+     */
+    if (EventLoop::wait_for_stopping(EventLoop::WaitAfterCloseEpoll))
+        return;
+
+    throw std::runtime_error("Can not stop EventLoop");
+}
+
+bool EventLoop::wait_for_stopping(int ms) {
+    Logger& logger = Logger::Instance();
+    std::mutex mutex;
+
+    auto start_wait_time = std::chrono::system_clock::now();
+    while (state != State::Stopped) {
+        std::unique_lock<std::mutex> lock(mutex);
+        cv.wait_until(
+            lock,
+            start_wait_time + std::chrono::milliseconds(ms),
+            [this]() { return state.load() == State::Stopped; }
+        );
+
+        if (state == State::Stopped) {
+            logger.write("EventLoop stopped!");
+            return true;
+        }
+
+        auto cur_time = std::chrono::system_clock::now();
+        auto int_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            cur_time - start_wait_time
+        );
+
+        if (int_ms.count() > ms) {
+            logger.write("EventLoop stop wait time is out");
+            return false;
+        }
+    }
+
+    return state == State::Stopped;
+}
+
+void EventLoop::clear_tasks_data() {
+    Logger& logger = Logger::Instance();
+    logger.write("Start clear");
+    for (auto& item : events_tasks) {
+        close(item.first);
+        delete item.second;
+    }
+    logger.write("End clear");
+}
+
+void EventLooPInterrupter::interrupt() {
+    uint64_t counter(1UL);
+    int result;
+    check_and_assign_sys_call(result, write(fd, &counter, sizeof(uint64_t)));
+}
+
+EventLooPInterrupter::EventLooPInterrupter(): epoll_fd(-1) {
+    check_and_assign_sys_call(fd, eventfd(0, 0));
+}
+
+EventLooPInterrupter::~EventLooPInterrupter() {
+    close(fd);
+}
+
+void EventLooPInterrupter::init(int epoll_fd) {
+    this->epoll_fd = epoll_fd;
+}
 }
 }
 }

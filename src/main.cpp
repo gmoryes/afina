@@ -177,7 +177,7 @@ int main(int argc, char **argv) {
 
         std::cout << "Application stopped" << std::endl;
     } catch (std::exception &e) {
-        std::cerr << "Fatal error" << e.what() << std::endl;
+        std::cerr << "Fatal error: " << e.what() << std::endl;
     }
 
     return 0;

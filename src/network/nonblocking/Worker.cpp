@@ -9,13 +9,8 @@ namespace NonBlocking {
 // See Worker.h
 Worker::Worker(std::shared_ptr<Afina::Storage> ps,
                const std::pair<int, int>& fifo):
-    stop(false),
     storage(std::move(ps)),
-    fifo(fifo) {}
-
-// See Worker.h
-Worker::~Worker() {
-    stop = false;
+    fifo(fifo) {
 }
 
 bool reader(const std::shared_ptr<Worker>& worker,
@@ -132,14 +127,16 @@ void Worker::Start(int server_socket, int worker_number) {
 
 // See Worker.h
 void Worker::Stop() {
-    std::cout << "network debug: " << __PRETTY_FUNCTION__ << std::endl;
-    stop = true;
+    event_loop.Stop();
 }
 
 // See Worker.h
 void Worker::Join() {
-    std::cout << "network debug: " << __PRETTY_FUNCTION__ << std::endl;
-    // TODO: Nothing here lol
+    event_loop.Join();
+}
+
+Worker::~Worker() {
+    Worker::Join();
 }
 
 } // namespace NonBlocking

@@ -11,6 +11,7 @@
 #include <unistd.h>
 #include <sys/epoll.h>
 #include "EventLoop.h"
+#include <atomic>
 
 namespace Afina {
 
@@ -32,7 +33,7 @@ public:
     using storage_type = std::shared_ptr<Afina::Storage>;
     using SharedParsers = std::vector<std::shared_ptr<Protocol::Parser>>;
 
-    //Worker(): storage(-1ll) {}
+    Worker() = default;
     Worker(std::shared_ptr<Afina::Storage> ps, const std::pair<int, int>& fifo);
     Worker(Worker&&) = default;
     ~Worker();
@@ -68,9 +69,6 @@ public:
                        const std::shared_ptr<Protocol::Parser>& parser,
                        int fd,
                        SmartString& buffer);
-    //friend bool writer(Worker& worker, EventTask& event_task, int has_written);
-
-    bool stop;
 
 protected:
     /**

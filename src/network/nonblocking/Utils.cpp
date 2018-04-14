@@ -45,7 +45,8 @@ void delete_if_need(const std::string& name, bool force) {
 
 int make_fifo_file(const std::string& name) {
     int fd;
-    check_sys_call(unlink(name.c_str()));
+    if (is_file_exists(name))
+        check_sys_call(unlink(name.c_str()));
     check_sys_call(mkfifo(name.c_str(), 0777));
 
     check_and_assign_sys_call(fd, open(name.c_str(), O_RDWR));
