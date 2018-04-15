@@ -127,6 +127,7 @@ void EventLoop::async_accept(int server_socket, std::function<bool(int)> func) {
     ev.data.ptr = task;
 
     check_sys_call(epoll_ctl(_epoll_fh, EPOLL_CTL_ADD, server_socket, &ev));
+    events_tasks[server_socket] = task;
 }
 
 void EventLoop::async_read(int fd, std::function<bool(int, SmartString&)> func, uint32_t flags) {
@@ -140,8 +141,8 @@ void EventLoop::async_read(int fd, std::function<bool(int, SmartString&)> func, 
     task->add_reader(std::move(func));
     ev.data.ptr = task;
 
-    events_tasks[fd] = task;
     check_sys_call(epoll_ctl(_epoll_fh, EPOLL_CTL_ADD, fd, &ev));
+    events_tasks[fd] = task;
 }
 
 
@@ -192,6 +193,12 @@ void EventLoop::loop() {
             state = State::Stopping;
 
         for (int i = 0; i < events_count; i++) {
+            if (_events[i].data.ptr == &interrupter) {
+                logger.write("Get interrupter in loop");
+                _stop.store(true);
+                break;
+            }
+
             auto task = static_cast<EventTask*>(_events[i].data.ptr);
             bool should_delete = false, was_error = false;
             try {
@@ -207,10 +214,14 @@ void EventLoop::loop() {
             }
         }
     }
+
     logger.write("Stopping");
     state = State::Stopping;
+
     EventLoop::clear_tasks_data();
+
     state = State::Stopped;
+
     logger.write("Send notify of done");
     cv.notify_all();
 }
@@ -223,8 +234,12 @@ bool EventLoop::Start(int events_max_number) {
 
     interrupter.init(_epoll_fh);
     epoll_event ev{};
+
     ev.events = EPOLLET | EPOLLIN | EPOLLHUP;
+    ev.data.ptr = &interrupter;
     check_sys_call(epoll_ctl(_epoll_fh, EPOLL_CTL_ADD, interrupter.fd, &ev));
+
+    return true;
 }
 
 void EventLoop::delete_event(int fd) {

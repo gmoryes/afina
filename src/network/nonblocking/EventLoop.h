@@ -97,7 +97,7 @@ public:
 
     ~EventLoop() {
         if (_events)
-            delete _events;
+            delete[] _events;
     }
 
     bool Start(int events_max_number);

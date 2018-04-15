@@ -174,7 +174,7 @@ int main(int argc, char **argv) {
         app.server->Stop();
         app.server->Join();
         app.storage->Stop();
-
+        
         std::cout << "Application stopped" << std::endl;
     } catch (std::exception &e) {
         std::cerr << "Fatal error: " << e.what() << std::endl;
