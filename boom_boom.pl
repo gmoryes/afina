@@ -13,6 +13,12 @@ say "Write forks num";
 $fork_cnt = <>;
 $fork_cnt = int($fork_cnt);
 
+say "How many messages send (1, 2, 3 ...)";
+my $msg_cnt;
+$msg_cnt = <>;
+$msg_cnt = int($msg_cnt);
+$msg_cnt ||= 1;
+
 my $worker_num = 0;
 my @pids = ();
 my $logg_prefix = "worker";
@@ -38,7 +44,7 @@ for my $i (1 .. $fork_cnt) {
             next;
         }
         $socket->autoflush(1);
-        for (1..3) {
+        for (1 .. $msg_cnt) {
             my $msg = $pre."aaaaaaaaaaaaaaaaaaaaaaaaaafoo".$suf;
             $suf++;
             my $full_msg = "set $msg 0 0 6\r\nnewval\r\n";
@@ -46,6 +52,7 @@ for my $i (1 .. $fork_cnt) {
             socket_write($socket, $full_msg);
 
             my $data;
+            logg "wait data";
             recv($socket, $data, 2000, 0);
             logg "data = $data";
             $data = "";
@@ -79,8 +86,10 @@ sub socket_write {
     say "start send: \"".quote_symbols($msg)."\", size=".length($msg);
 	$sended = send($socket, $msg, MSG_DONTWAIT | O_NONBLOCK);
     if ($sended) { 
+        say "send ok";
         return 1;
     } else {
+        say "send not ok";
         return 0;
     }
 }

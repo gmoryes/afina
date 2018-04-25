@@ -2,7 +2,6 @@
 #define AFINA_NETWORK_NONBLOCKING_SERVER_H
 
 #include <vector>
-
 #include <afina/network/Server.h>
 
 namespace Afina {

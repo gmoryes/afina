@@ -4,3 +4,4 @@ set(SOURCE_FILES
 )
 
 add_library(Coroutine ${SOURCE_FILES})
+target_link_libraries(Coroutine ${CMAKE_THREAD_LIBS_INIT})

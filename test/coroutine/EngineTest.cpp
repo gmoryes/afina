@@ -16,7 +16,7 @@ TEST(CoroutineTest, SimpleStart) {
     ASSERT_EQ(3, result);
 }
 
-void printa(Afina::Coroutine::Engine &pe, std::stringstream &out, void *&other) {
+void printa(Afina::Coroutine::Engine &pe, std::stringstream &out, Afina::Coroutine::context *&other) {
     out << "A1 ";
     std::cout << "A1 " << std::endl;
     pe.sched(other);
@@ -30,7 +30,7 @@ void printa(Afina::Coroutine::Engine &pe, std::stringstream &out, void *&other) 
     pe.sched(other);
 }
 
-void printb(Afina::Coroutine::Engine &pe, std::stringstream &out, void *&other) {
+void printb(Afina::Coroutine::Engine &pe, std::stringstream &out, Afina::Coroutine::context *&other) {
     out << "B1 ";
     std::cout << "B1 " << std::endl;
     pe.sched(other);
@@ -44,7 +44,7 @@ void printb(Afina::Coroutine::Engine &pe, std::stringstream &out, void *&other) 
 }
 
 std::stringstream out;
-void *pa = nullptr, *pb = nullptr;
+Afina::Coroutine::context *pa = nullptr, *pb = nullptr;
 void _printer(Afina::Coroutine::Engine &pe, std::string &result) {
     // Create routines, note it doens't get control yet
     pa = pe.run(printa, pe, out, pb);
