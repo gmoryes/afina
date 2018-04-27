@@ -1,0 +1,4 @@
+#ifndef AFINA_EVENTLOOP_H
+#define AFINA_EVENTLOOP_H
+
+#endif //AFINA_EVENTLOOP_H

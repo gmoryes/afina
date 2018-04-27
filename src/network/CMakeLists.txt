@@ -6,6 +6,7 @@ set(SOURCE_FILES
     coroutines/ServerImpl.cpp
     coroutines/Worker.cpp
     coroutines/Client.cpp
+    coroutines/EventLoop.cpp
 
     nonblocking/EventLoop.cpp
     nonblocking/ServerImpl.cpp

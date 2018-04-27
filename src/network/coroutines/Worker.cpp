@@ -68,6 +68,7 @@ void Worker::Run() {
     logger.write("Hello");
 
     engine.start(&acceptor, this, server_socket);
+    //event_loop.loop()
 
     has_stopped.store(true);
     stop_cv.notify_all();

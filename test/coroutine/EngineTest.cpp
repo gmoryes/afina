@@ -69,3 +69,4 @@ TEST(CoroutineTest, Printer) {
     engine.start(_printer, engine, result);
     ASSERT_STREQ("A1 B1 A2 B2 A3 B3 END", result.c_str());
 }
+

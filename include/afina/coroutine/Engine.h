@@ -111,13 +111,16 @@ public:
      */
     template <typename... Ta> void start(void (*main)(Ta...), Ta &&... args) {
         // To acquire stack begin, create variable on stack and remember its address
-        volatile char StackStartsHere;
+        volatile long StackStartsHere;
         this->StackBottom = reinterpret_cast<unsigned long>(&StackStartsHere);
 
         // Start routine execution
         context *pc = run(main, std::forward<Ta>(args)...);
+        std::cout << "here1" << std::endl;
         if (pc == nullptr)
             std::runtime_error("Engine::run() return nullptr");
+
+        std::cout << "here2" << std::endl;
 
         idle_ctx = new context();
         idle_ctx->Low = this->StackBottom;
@@ -159,6 +162,7 @@ public:
             return nullptr;
         }
 
+        int x = 123123123;
         /* debug */
         Logger& logger = Logger::Instance();
 
@@ -175,7 +179,7 @@ public:
              * Created routine got control in order to start execution. Note that all variables, such as
              * context pointer, arguments and a pointer to the function comes from restored stack
              */
-
+            std::cout << "x = " << x << std::endl;
             // invoke routine
             func(std::forward<Ta>(args)...);
 
