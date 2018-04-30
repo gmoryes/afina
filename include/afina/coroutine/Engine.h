@@ -116,11 +116,8 @@ public:
 
         // Start routine execution
         context *pc = run(main, std::forward<Ta>(args)...);
-        std::cout << "here1" << std::endl;
         if (pc == nullptr)
             std::runtime_error("Engine::run() return nullptr");
-
-        std::cout << "here2" << std::endl;
 
         idle_ctx = new context();
         idle_ctx->Low = this->StackBottom;
@@ -162,10 +159,6 @@ public:
             return nullptr;
         }
 
-        int x = 123123123;
-        /* debug */
-        Logger& logger = Logger::Instance();
-
         // New coroutine context that carries around all information enough to call function
         context *pc = new context();
         pc->Low = StackBottom;
@@ -179,7 +172,7 @@ public:
              * Created routine got control in order to start execution. Note that all variables, such as
              * context pointer, arguments and a pointer to the function comes from restored stack
              */
-            std::cout << "x = " << x << std::endl;
+
             // invoke routine
             func(std::forward<Ta>(args)...);
 

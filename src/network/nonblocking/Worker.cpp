@@ -102,7 +102,7 @@ void Worker::OnRun(int server_socket, int worker_number, int r_fifo = -1) {
         auto new_parser = std::make_shared<Protocol::Parser>();
 
         auto bind_reader = std::bind(reader, shared_from_this(), new_parser, _1, _2);
-        event_loop.async_read(r_fifo, std::move(bind_reader), EPOLLIN | EPOLLEXCLUSIVE | EPOLLHUP);
+        event_loop.async_read(r_fifo, std::move(bind_reader), EPOLLIN | EPOLLHUP);
     }
 
     auto bind_acceptor = std::bind(acceptor, shared_from_this(), _1);
